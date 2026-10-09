@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8791", "--persist-to", ".wrangler/revenue-validation"],
+      "port": 8791
+    },
+    {
+      "name": "cleaning-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8792", "--persist-to", ".wrangler/cleaning-validation"],
+      "port": 8792
+    },
+    {
+      "name": "toolbar-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8793", "--persist-to", ".wrangler/toolbar-validation"],
+      "port": 8793
+    },
+    {
+      "name": "trend-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8794", "--persist-to", ".wrangler/trend-validation"],
+      "port": 8794
+    },
+    {
+      "name": "lot-cleaning-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8795", "--persist-to", ".wrangler/lot-cleaning-validation"],
+      "port": 8795
+    }
+  ]
+}

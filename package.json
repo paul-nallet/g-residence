@@ -1,0 +1,48 @@
+{
+  "name": "gresidence",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "predev": "npm run db:local && npm run build",
+    "frontend": "vite --host 127.0.0.1 --port 5174",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "precheck": "npm run build",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && wrangler deploy --dry-run",
+    "astryx": "node node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs",
+    "types": "wrangler types",
+    "db:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "@astryxdesign/cli": "^0.6.6",
+    "@astryxdesign/core": "^0.6.6",
+    "@astryxdesign/theme-neutral": "^0.6.6",
+    "@stylexjs/stylex": "^0.19.1",
+    "effect": "^4.0.2",
+    "lucide-react": "^1.53.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "recharts": "^3.10.1",
+    "vite": "^8.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "astryx": {
+    "theme": "@astryxdesign/theme-neutral"
+  }
+}
