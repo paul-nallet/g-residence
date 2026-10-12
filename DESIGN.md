@@ -64,8 +64,8 @@ Un sélecteur Astryx propose Basse, Normale, Haute et Urgente dans les formulair
 
 ## Visites techniques
 
-Entrée autonome dans la sidenav, sans onglet de Technique ni rangée supplémentaire de liens. En-tête « Visites techniques », actions « Voir les échéances » et « Planifier une visite ». Une seule surface de données : historique des visites ou échéances, avec filtre bâtiment ; historique également filtrable par statut et recherche. Table paginée côté API, Token explicite pour les retards.
+Entrée autonome dans la sidenav, sans onglet de Technique ni rangée supplémentaire de liens. En-tête « Visites techniques », actions « Voir les échéances », « Modèles » et « Planifier une visite ». Une seule surface de données : historique des visites ou échéances, avec filtre bâtiment ; historique également filtrable par statut et recherche. Table paginée côté API, Token explicite pour les retards.
 
-Planification en dialogue guidé : bâtiment, titre, date, fréquence mensuelle par défaut ; puis points à contrôler, à partir d’une liste visuelle proposée et personnalisable. Aucun formulaire préalable de création de modèle. La prochaine visite peut reprendre les points de la précédente. Fréquence modifiable depuis les échéances.
+Planification en dialogue guidé : bâtiment, titre, date, fréquence mensuelle par défaut ; puis points à contrôler, à partir d’une liste visuelle proposée et personnalisable. Modèles facultatifs accessibles via une liste, avec création et modification sur une page complète #visits/templates/new ou #visits/templates/<id>, jamais en modale. Formulaire continu : organisation puis points ordonnés par zone, cadre Layout/PageLayout et sections du template settings. La prochaine visite peut reprendre les points de la précédente. Fréquence modifiable depuis les échéances.
 
 Fiche adressable #visits/<id>, fil d’Ariane du shell et points groupés par zone en List. Avancement et constats explicites, saisie en dialogue, observations obligatoires pour anomalies ou points non vérifiés. Terminer demande date réelle et compte rendu. Après clôture : lecture seule, création explicite d’un signalement par anomalie et copie Excel du compte rendu.

@@ -2,7 +2,7 @@
 
 Statut : accepté, 12 octobre 2026, à la demande de Paul.
 
-Une visite contrôle un bâtiment sans nécessiter de chantier. Rubrique autonome dans la sidenav. Planification directe, sans création préalable de modèle ; checklist ordonnée par zone, fréquence hebdomadaire/mensuelle/trimestrielle/ponctuelle ; mensuelle par défaut. La tournée conserve implicitement les points à reprendre et sa fréquence par bâtiment. Les contrôles spécialisés des équipements ne sont pas couverts par cette cadence opérationnelle.
+Une visite contrôle un bâtiment sans nécessiter de chantier. Rubrique autonome dans la sidenav. Planification directe possible, ou modèle facultatif créé et modifié sur une page complète, jamais en modale ; checklist ordonnée par zone, fréquence hebdomadaire/mensuelle/trimestrielle/ponctuelle ; mensuelle par défaut. La tournée conserve implicitement les points à reprendre et sa fréquence par bâtiment. Les contrôles spécialisés des équipements ne sont pas couverts par cette cadence opérationnelle.
 
 D1 conserve modèles, snapshots de visites, constats signés et trace des modifications. Une seule visite prévue par modèle. Les constats clos ne se réécrivent pas ; une nouvelle visite corrige l’état observé. Un point non vérifié doit être expliqué et reste distinct d’un point conforme. La création d’un signalement se fait après clôture et reste explicite, avec un lien unique au point.
 

@@ -273,6 +273,23 @@ test('visites : planification directe atomique sans création préalable de mod�
     assert.equal(await e.status('/technical/visits/new', 'POST', payload, await e.cleaner()), 403)
     assert.ok(first_due)
     assert.equal(archived, false)
+    assert.equal(await e.status('/technical/visits/new', 'POST', { ...payload, frequency: 'weekly' }), 409)
+    assert.equal((await e.json<VisitTemplate>('/technical/visit-templates/' + detail.template_id)).frequency, 'monthly')
+    await e.json('/technical/visits/' + visit.id + '/actions', 'POST', {
+      action: 'cancel',
+      completed_on: null,
+      report: '',
+    })
+    const next = await e.json<{ id: string }>('/technical/visits/new', 'POST', {
+      ...payload,
+      frequency: 'weekly',
+      points: [{ zone: 'Hall', label: 'Porte', location: null }],
+    })
+    const nextDetail = await e.json<VisitDetail>('/technical/visits/' + next.id)
+    assert.equal(nextDetail.template_id, detail.template_id)
+    assert.equal(nextDetail.points.length, 1)
+    assert.equal((await e.json<VisitDetail>('/technical/visits/' + visit.id)).points.length, 2)
+    assert.equal((e.sqlite.prepare('SELECT COUNT(*) AS n FROM visit_templates').get() as { n: number }).n, 1)
   } finally {
     await e.dispose()
   }

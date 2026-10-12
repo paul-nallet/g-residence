@@ -171,9 +171,11 @@ Listes filtrables par statut et recherche, paginées côté API ; les travaux no
 
 ## Visites techniques des bâtiments
 
-Extension demandée le 12 octobre 2026 : rubrique autonome « Visites techniques » dans la sidenav, distincte de Technique. Administrateurs et gestionnaires uniquement, dans la résidence autorisée. Aucun modèle à créer avant une visite.
+Extension demandée le 12 octobre 2026 : rubrique autonome « Visites techniques » dans la sidenav, distincte de Technique. Administrateurs et gestionnaires uniquement, dans la résidence autorisée. Création directe possible, ou utilisation d’un modèle facultatif. Les modèles se créent et se modifient sur une page complète, jamais dans une modale.
 
 Planification directe : bâtiment obligatoire, titre, jour prévu, fréquence hebdomadaire, mensuelle (par défaut), trimestrielle ou ponctuelle, puis points à contrôler. Une liste de départ de six observations visuelles est proposée (accès, éclairage, sols et murs, encombrement, fuites ou humidité, dégradations), personnalisable par zone, de 1 à 50 points. Elle ne constitue pas une checklist de conformité réglementaire. Le titre identifie une tournée dans un bâtiment ; les visites suivantes peuvent reprendre les mêmes points. Une seule visite prévue par tournée ; elle peut être reportée ou annulée. Chaque visite conserve ses points, son titre, son bâtiment et sa fréquence d’origine.
+
+La page « Modèles » permet de préparer, modifier et archiver les checklists réutilisables par bâtiment ; nom unique par bâtiment, ordre des points, lieu facultatif, fréquence et première échéance. Le bâtiment d’un modèle ne se modifie pas. Toute modification conserve les visites déjà créées. Une planification directe crée ou met à jour la tournée du même titre dans ce bâtiment.
 
 La vue « Échéances » indique la fréquence modifiable, la dernière visite réalisée et la prochaine échéance, avec action pour planifier la prochaine en reprenant les points. La prochaine échéance part de la dernière date réelle de visite terminée : 7 jours, 1 mois ou 3 mois, en ramenant le jour au dernier jour du mois si nécessaire. Avant la première réalisation, le jour de la première visite reste la référence. Une annulation ne repousse pas l’échéance. Une tournée ponctuelle n’a pas d’échéance récurrente. Aucun rendez-vous créé automatiquement, aucune tâche de fond ni notification.
 
