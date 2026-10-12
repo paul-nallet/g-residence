@@ -19,7 +19,7 @@ import {
 import type { Inspection, Notice, Stay } from '../domain/stays.ts'
 import { addDays } from '../domain/rules.ts'
 import { Agenda } from './Agenda.ts'
-import { onViolation, sql, Sql, type SqlError } from './Database.ts'
+import { folded, onViolation, searchPattern, sql, Sql, type SqlError } from './Database.ts'
 import { auditStatement } from './History.ts'
 
 type Query = { readonly [K in keyof typeof LotQuery]?: (typeof LotQuery)[K]['Type'] }
@@ -75,10 +75,10 @@ const make = Effect.gen(function* () {
   const list = Effect.fn('Lots.list')(function* (input: Query) {
     const me = yield* CurrentUser
     const page = input.page ?? 1
-    const search = '%' + (input.q ?? '').trim().replace(/[\\%_]/g, '\\$&') + '%'
+    const search = searchPattern(input.q)
     const state = input.state ?? 'all',
       building = input.building ?? 'all'
-    const filter = `l.residence_id=? AND l.archived=? AND (l.number LIKE ? ESCAPE '\\' OR l.floor LIKE ? ESCAPE '\\' OR l.type LIKE ? ESCAPE '\\') AND (?='all' OR ${occupancy}=?) AND (?='all' OR l.building_id=?)`
+    const filter = `l.residence_id=? AND l.archived=? AND (${folded('l.number')} LIKE ? ESCAPE '\\' OR ${folded('l.floor')} LIKE ? ESCAPE '\\' OR ${folded('l.type')} LIKE ? ESCAPE '\\') AND (?='all' OR ${occupancy}=?) AND (?='all' OR l.building_id=?)`
     const values = [
       me.residenceId,
       input.archived === 'yes' ? 1 : 0,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { messageOf } from './api.ts'
+import { checkForChanges, subscribeToChanges } from './sync.ts'
 
 export function useQuery<A>(key: string, load: () => Promise<A>) {
   const [result, setResult] = useState<{ key: string; data: A | null; error: string }>({
@@ -32,6 +33,7 @@ export function useQuery<A>(key: string, load: () => Promise<A>) {
       active = false
     }
   }, [key, load])
+  useEffect(() => subscribeToChanges(() => void refresh()), [refresh])
   const current = result.key === key
   return { data: result.data, error: current ? result.error : '', isPending: !current, refresh }
 }
@@ -50,6 +52,7 @@ export function useMutation() {
       await action()
       setSuccess('Enregistrement effectué.')
       done?.()
+      void checkForChanges()
       return true
     } catch (cause) {
       setError(messageOf(cause))

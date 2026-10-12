@@ -1,7 +1,16 @@
 import { Effect } from 'effect'
 import { HttpServerResponse } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'
-import { BadRequest, Conflict, Forbidden, issueMessage, NotFound, TooManyRequests, Unauthorized } from '../api/Api.ts'
+import {
+  BadRequest,
+  Conflict,
+  Forbidden,
+  issueMessage,
+  NotFound,
+  ServiceUnavailable,
+  TooManyRequests,
+  Unauthorized,
+} from '../api/Api.ts'
 import type { AdminOnly, ManagementOnly } from '../domain/CurrentUser.ts'
 import type { InvalidInput } from '../domain/errors.ts'
 import { describeSqlFailure, SqlError } from '../services/Database.ts'
@@ -29,6 +38,7 @@ export const forbidden = (error: string) => () => new Forbidden({ error })
 export const notFound = (error: string) => () => new NotFound({ error })
 export const conflict = (error: string) => () => new Conflict({ error })
 export const tooManyRequests = (error: string) => () => new TooManyRequests({ error })
+export const serviceUnavailable = (error: string) => () => new ServiceUnavailable({ error })
 
 const common = {
   ManagementOnly: forbidden('Action réservée à la gestion.'),

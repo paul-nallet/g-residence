@@ -30,6 +30,48 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "dev", "--port", "8795", "--persist-to", ".wrangler/lot-cleaning-validation"],
       "port": 8795
+    },
+    {
+      "name": "search-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8796", "--persist-to", ".wrangler/search-validation"],
+      "port": 8796
+    },
+    {
+      "name": "ideas-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8797", "--persist-to", ".wrangler/ideas-validation"],
+      "port": 8797
+    },
+    {
+      "name": "technical-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8798", "--persist-to", ".wrangler/technical-validation"],
+      "port": 8798
+    },
+    {
+      "name": "studio-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8799", "--persist-to", ".wrangler/studio-validation"],
+      "port": 8799
+    },
+    {
+      "name": "modal-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8800", "--persist-to", ".wrangler/modal-validation"],
+      "port": 8800
+    },
+    {
+      "name": "nav-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8802", "--persist-to", ".wrangler/nav-validation"],
+      "port": 8802
+    },
+    {
+      "name": "overview-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8803", "--persist-to", ".wrangler/overview-validation"],
+      "port": 8803
     }
   ]
 }

@@ -39,6 +39,20 @@ rtk proxy npx wrangler dev --port 8791 --persist-to .wrangler/v1-validation
 
 La configuration D1 contient un identifiant réservé au développement local. Aucun déploiement distant effectué. Une installation publique nécessitera une vraie ressource D1 et `ADMIN_EMAIL` ; sans email administrateur configuré, l’installation publique est verrouillée. Sessions par cookie HttpOnly, mots de passe hachés, limitation des tentatives et protection des mutations intersites.
 
+## AI Studio
+
+Panneau latéral (icône ✦ de la barre supérieure) pour questionner l’état de la résidence et préparer des micro-actions. Le modèle lit les données via des outils bornés au rôle de l’utilisateur ; toute modification (mouvement de stock, relevé de compteur, statut de ménage) est une proposition appliquée seulement après confirmation.
+
+Désactivé par défaut. Pour l’activer en local, créer `.dev.vars` :
+
+```
+AI_PROVIDER=anthropic
+AI_API_KEY=...
+AI_MODEL=claude-opus-5-5
+```
+
+`AI_MODEL` est facultatif. Le fournisseur est un port (`src/services/AiProvider.ts`) : un autre fournisseur s’ajoute par un adaptateur, sans toucher au studio.
+
 ## Vérifier
 
 ```bash

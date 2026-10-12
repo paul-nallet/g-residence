@@ -28,7 +28,7 @@ Navigation initiale : Vue d'ensemble, Lots et mouvements, Calendrier, Ménage, T
 
 ## Construction
 
-Respecter les règles Astryx d'AGENTS.md : template avant nouvelle page, composants pour le layout, tokens et props pour les adaptations. Le thème Neutral démarre en mode sombre. Le sélecteur de la barre supérieure propose Clair, Sombre et Système ; le choix est mémorisé dans ce navigateur. Système suit les préférences du système d’exploitation.
+Respecter les règles Astryx d'AGENTS.md : template avant nouvelle page, composants pour le layout, tokens et props pour les adaptations. Le thème étend Neutral avec la charte Student Factory : bleu nuit `#032230` et beige `#f9f8f0` pour les fonds et le texte, accent bleu `#004666` en clair et jaune `#ffcc00` en sombre, Lato pour le texte, Oswald pour les titres (Google Fonts), rayons de 2 px. Il démarre en mode sombre. Le sélecteur de la barre supérieure propose Clair, Sombre et Système ; le choix est mémorisé dans ce navigateur. Système suit les préférences du système d’exploitation.
 
 Le cadre AppShell utilise la variante section, sans l’arrondi du panneau élevé. La navigation latérale conserve un fond secondaire neutre via le token de fond body du thème, en clair comme en sombre. Elle démarre à 240 px, avec l’identité GResidence en tête, sans titre de gestion ni compte en pied ; le nom et le rôle figurent dans le menu du compte en haut à droite. Les pages exploitent la largeur disponible avec un retrait Astryx de 4. PageLayout sépare l’en-tête fixe du contenu défilant et propose un emplacement de navigation secondaire. La fiche du lot affiche un fil d’Ariane au-dessus du titre.
 

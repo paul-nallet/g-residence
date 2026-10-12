@@ -25,5 +25,7 @@
   ],
   "vars": {
     "ADMIN_EMAIL": "",
+    "AI_PROVIDER": "",
+    "AI_MODEL": "",
   },
 }

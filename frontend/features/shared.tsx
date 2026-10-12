@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { ButtonGroup } from '@astryxdesign/core/ButtonGroup'
@@ -9,7 +9,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
 import { List, ListItem } from '@astryxdesign/core/List'
 import { Selector } from '@astryxdesign/core/Selector'
-import { VStack, HStack } from '@astryxdesign/core/Stack'
+import { VStack, HStack, StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
@@ -28,7 +28,14 @@ export const kindLabels = {
   exit: 'Départ prévu',
   inspection_entry: 'État des lieux d’entrée',
   inspection_exit: 'État des lieux de sortie',
+  intervention: 'Intervention technique',
 }
+export const eventSubject = (event: Event) =>
+  event.kind === 'intervention'
+    ? (event.title ?? '') + (event.place ? ' · ' + event.place : '')
+    : 'Lot ' + event.lotNumber
+export const eventHref = (event: Event) =>
+  event.kind === 'intervention' ? '#technical/travaux/' + event.workId : '#lots/' + event.lotId
 export const roleLabels = { admin: 'Administrateur', manager: 'Gestionnaire', cleaner: 'Ménage' }
 export const statusLabels = {
   planned: 'Prévu',
@@ -144,23 +151,26 @@ export function Editor({
       width={560}
       padding={6}
     >
-      <VStack gap={4}>
+      <VStack
+        as="form"
+        gap={4}
+        isScrollable
+        onSubmit={(event: FormEvent) => {
+          event.preventDefault()
+          if (!busy && !disabled) submit()
+        }}
+      >
         <DialogHeader title={title} />
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (!busy && !disabled) submit()
-          }}
-        >
+        <StackItem size="fill" isScrollable>
           <VStack gap={4}>
             {children}
             <Feedback error={error} />
-            <HStack gap={2} wrap="wrap" hAlign="end">
-              <Button label="Annuler" onClick={close} isDisabled={busy} />
-              <Button label={label} variant="primary" type="submit" isLoading={busy} isDisabled={busy || disabled} />
-            </HStack>
           </VStack>
-        </form>
+        </StackItem>
+        <HStack gap={2} wrap="wrap" hAlign="end">
+          <Button label="Annuler" onClick={close} isDisabled={busy} />
+          <Button label={label} variant="primary" type="submit" isLoading={busy} isDisabled={busy || disabled} />
+        </HStack>
       </VStack>
     </Dialog>
   )
@@ -172,8 +182,8 @@ export function EventList({ events, title = 'Événements' }: { events: readonly
         events.map((event) => (
           <ListItem
             key={event.id}
-            label={`${event.time ? event.time + ' · ' : ''}Lot ${event.lotNumber} · ${kindLabels[event.kind]}`}
-            href={'#lots/' + event.lotId}
+            label={`${event.time ? event.time + ' · ' : ''}${eventSubject(event)} · ${kindLabels[event.kind]}`}
+            href={eventHref(event)}
             description={`${dateLabel(event.date)}${event.duration ? ' · ' + event.duration + ' min' : ''}${event.resident ? ' · ' + event.resident : ''}${event.comment ? ' · ' + event.comment : ''}`}
             endContent={<StateToken state={event.status} />}
           />

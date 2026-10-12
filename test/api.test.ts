@@ -703,6 +703,13 @@ test('stocks : articles libres, mouvements, inventaire, stocks faibles et isolat
     )
     filtered = (await (await e.request('/stock?q=cowork')).json()) as Page
     assert.equal(filtered.total, 1)
+    filtered = (await (await e.request('/stock?q=HYGIENE')).json()) as Page
+    assert.deepEqual(
+      filtered.items.map((item) => item.name),
+      ['Brosse à toilette'],
+    )
+    filtered = (await (await e.request('/stock?q=' + encodeURIComponent('brosse á'))).json()) as Page
+    assert.equal(filtered.total, 1)
     const view = { name: 'Coworking', categories: [coworking, categoryId('Literie')] }
     assert.equal((await e.request('/stock/views', 'POST', { ...view, categories: [] })).status, 400)
     assert.equal((await e.request('/stock/views', 'POST', { ...view, categories: ['foreign'] })).status, 404)

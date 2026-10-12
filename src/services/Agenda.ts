@@ -15,6 +15,17 @@ import { addDays, monday, parisDate, parisTime } from '../domain/rules.ts'
 import { sql, Sql } from './Database.ts'
 
 type Resident = { number: string; first_name: string; last_name: string }
+type Intervention = {
+  id: string
+  work_id: string
+  title: string
+  starts_at: string
+  duration: number
+  status: string
+  report: string
+  supplier: string
+  place: string | null
+}
 
 const make = Effect.gen(function* () {
   const db = yield* Sql
@@ -26,7 +37,8 @@ const make = Effect.gen(function* () {
     const restriction = lotId ? ' AND l.id=?' : '',
       scope = lotId ? [me.residenceId, lotId] : [me.residenceId]
     const hidden = me.role === 'cleaner'
-    const [stays, inspections] = yield* Effect.all([
+    const window = [addDays(from, -1) + 'T00:00:00.000Z', addDays(to, 1) + 'T23:00:00.000Z'] as const
+    const [stays, inspections, interventions] = yield* Effect.all([
       db.all<Stay & { number: string }>(
         sql(
           `SELECT s.*,l.number FROM stays s JOIN lots l ON l.id=s.lot_id WHERE s.residence_id=? AND s.cancelled=0 ${restriction} AND (s.planned_start BETWEEN ? AND ? OR s.planned_end BETWEEN ? AND ?)`,
@@ -41,10 +53,25 @@ const make = Effect.gen(function* () {
         sql(
           `SELECT i.*,s.lot_id,s.first_name,s.last_name,l.number FROM inspections i JOIN stays s ON s.id=i.stay_id JOIN lots l ON l.id=s.lot_id WHERE i.residence_id=? AND s.cancelled=0 ${restriction} AND i.starts_at>=? AND i.starts_at<?`,
           ...scope,
-          addDays(from, -1) + 'T00:00:00.000Z',
-          addDays(to, 1) + 'T23:00:00.000Z',
+          ...window,
         ),
       ),
+      hidden
+        ? Effect.succeed([])
+        : db.all<Intervention>(
+            sql(
+              `SELECT i.id,i.work_id,w.title,i.starts_at,i.duration,i.status,i.report,COALESCE(s.name,'') AS supplier,
+              (SELECT group_concat(label,', ') FROM (SELECT CASE WHEN x.lot_id IS NOT NULL THEN 'Lot ' || l.number ELSE p.name END AS label
+                FROM work_locations x LEFT JOIN lots l ON l.id=x.lot_id LEFT JOIN places p ON p.id=x.place_id WHERE x.work_id=w.id
+                ORDER BY x.lot_id IS NULL,l.number COLLATE NOCASE,p.name COLLATE NOCASE)) AS place
+              FROM interventions i JOIN works w ON w.id=i.work_id LEFT JOIN suppliers s ON s.id=i.supplier_id
+              WHERE i.residence_id=? AND i.starts_at>=? AND i.starts_at<?
+              ${lotId ? 'AND EXISTS(SELECT 1 FROM work_locations x WHERE x.work_id=i.work_id AND x.lot_id=?)' : ''}`,
+              me.residenceId,
+              ...window,
+              ...(lotId ? [lotId] : []),
+            ),
+          ),
     ])
     const events: Event[] = stays.flatMap((stay) => stayEvents(stay, from, to, hidden))
     for (const inspection of inspections) {
@@ -61,6 +88,25 @@ const make = Effect.gen(function* () {
         status: inspection.status,
         resident: residentName(hidden, inspection),
         comment: hidden ? '' : inspection.comment,
+      })
+    }
+    for (const intervention of interventions) {
+      const date = parisDate(intervention.starts_at)
+      if (date < from || date > to) continue
+      events.push({
+        id: intervention.id,
+        lotId: '',
+        lotNumber: '',
+        kind: 'intervention',
+        date,
+        time: parisTime(intervention.starts_at),
+        duration: intervention.duration,
+        status: intervention.status,
+        resident: intervention.supplier,
+        comment: intervention.report,
+        workId: intervention.work_id,
+        title: intervention.title,
+        place: intervention.place ?? '',
       })
     }
     return sortEvents(events)

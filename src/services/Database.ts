@@ -3,6 +3,36 @@ import { Context, Effect, Layer, Schema } from 'effect'
 export type Value = string | number | null
 export type Statement = { sql: string; values: Value[] }
 export const sql = (query: string, ...values: Value[]): Statement => ({ sql: query, values })
+const accents = Object.entries({
+  a: 'àâäá',
+  A: 'ÀÂÄÁ',
+  e: 'éèêë',
+  E: 'ÉÈÊË',
+  i: 'îïí',
+  I: 'ÎÏÍ',
+  o: 'ôöó',
+  O: 'ÔÖÓ',
+  u: 'ùûüú',
+  U: 'ÙÛÜÚ',
+  c: 'ç',
+  C: 'Ç',
+  y: 'ÿ',
+  oe: 'œ',
+  OE: 'Œ',
+  ae: 'æ',
+  AE: 'Æ',
+}).flatMap(([plain, letters]) => [...letters].map((letter) => [letter, plain] as const))
+export const folded = (expression: string) =>
+  accents.reduce((folding, [from, to]) => `replace(${folding},'${from}','${to}')`, expression)
+export const searchPattern = (q?: string) =>
+  '%' +
+  (q ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[œŒæÆ]/g, (letter) => ({ œ: 'oe', Œ: 'OE', æ: 'ae', Æ: 'AE' })[letter] ?? letter)
+    .replace(/[\\%_]/g, '\\$&') +
+  '%'
 export interface DatabasePort {
   all<A>(statement: Statement): Promise<A[]>
   first<A>(statement: Statement): Promise<A | null>

@@ -454,7 +454,11 @@ const compactCount = (value: number) => value.toLocaleString('fr-FR', { notation
 const trendTitle = (row: TrendRow) => monthName(row.month)
 
 function MovementChart({ months, unit }: { months: ReadonlyArray<MonthlyMovements>; unit: string }) {
-  const data: TrendRow[] = months.map((month) => ({ ...month, label: shortMonth(month.month), outflow: -month.exits }))
+  const data: TrendRow[] = months.map((month) => ({
+    ...month,
+    label: shortMonth(month.month),
+    outflow: month.exits ? -month.exits : 0,
+  }))
   return (
     <VStack gap={3}>
       <Text size="sm" color="secondary">

@@ -9,11 +9,21 @@ import {
   Users,
   Wrench,
   FileSpreadsheet,
+  Lightbulb,
 } from 'lucide-react'
+
+export const navGroups = [
+  { id: 'home', title: 'Accueil', isHeaderHidden: true },
+  { id: 'residence', title: 'Résidence', isHeaderHidden: false },
+  { id: 'operations', title: 'Opérations', isHeaderHidden: false },
+  { id: 'follow', title: 'Suivi et comptes rendus', isHeaderHidden: false },
+  { id: 'admin', title: 'Administration', isHeaderHidden: false },
+] as const
 
 export const sections = [
   {
     id: 'overview',
+    group: 'home',
     label: 'Vue d’ensemble',
     icon: Home,
     description: 'Le quotidien de la résidence, au même endroit.',
@@ -25,6 +35,7 @@ export const sections = [
   },
   {
     id: 'lots',
+    group: 'residence',
     label: 'Lots et mouvements',
     icon: Building2,
     description: 'Le lot conserve son histoire, même lorsque son occupant change.',
@@ -36,6 +47,7 @@ export const sections = [
   },
   {
     id: 'calendar',
+    group: 'residence',
     label: 'Calendrier',
     icon: CalendarDays,
     description: 'Les rendez-vous et mouvements de la résidence.',
@@ -47,6 +59,7 @@ export const sections = [
   },
   {
     id: 'cleaning',
+    group: 'operations',
     label: 'Ménage',
     icon: ClipboardList,
     description: 'Un planning simple pour la personne chargée de l’entretien.',
@@ -58,6 +71,7 @@ export const sections = [
   },
   {
     id: 'technical',
+    group: 'operations',
     label: 'Technique',
     icon: Wrench,
     description: 'Des anomalies au suivi des interventions et des travaux.',
@@ -69,6 +83,7 @@ export const sections = [
   },
   {
     id: 'stock',
+    group: 'operations',
     label: 'Stocks',
     icon: Package,
     description: 'La réserve d’équipements et de consommables de la résidence.',
@@ -80,6 +95,7 @@ export const sections = [
   },
   {
     id: 'meters',
+    group: 'follow',
     label: 'Relevés',
     icon: Droplets,
     description: 'Les actions mensuelles dans les parties communes.',
@@ -91,6 +107,7 @@ export const sections = [
   },
   {
     id: 'services',
+    group: 'follow',
     label: 'Prestations',
     icon: Coffee,
     description: 'Le chiffre d’affaires des services proposés dans la résidence.',
@@ -102,6 +119,7 @@ export const sections = [
   },
   {
     id: 'reports',
+    group: 'follow',
     label: 'Rapports',
     icon: FileSpreadsheet,
     description: 'Un bilan de la semaine prêt à reporter dans Excel.',
@@ -113,6 +131,7 @@ export const sections = [
   },
   {
     id: 'team',
+    group: 'admin',
     label: 'Équipe',
     icon: Users,
     description: 'Les personnes qui interviennent dans la résidence.',
@@ -120,6 +139,18 @@ export const sections = [
       ['Comptes', 'Prévoir la connexion et les accès utilisateurs.'],
       ['Agent de ménage', 'Démarrer avec une personne tout en permettant d’en ajouter ensuite.'],
       ['Permissions', 'Préciser la visibilité et les actions autorisées avant la V1.'],
+    ],
+  },
+  {
+    id: 'ideas',
+    group: 'feedback',
+    label: 'Boîte à idées',
+    icon: Lightbulb,
+    description: 'Idées, demandes de fonctionnalités et bugs de l’application.',
+    items: [
+      ['Idée', 'Proposer une amélioration du quotidien.'],
+      ['Fonctionnalité', 'Demander un nouvel usage dans l’application.'],
+      ['Bug', 'Signaler un comportement inattendu.'],
     ],
   },
 ] as const

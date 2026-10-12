@@ -19,7 +19,7 @@ import { addDays, monday, today, monthLast, shiftMonth } from '../../src/domain/
 import { call } from '../lib/api.ts'
 import { useQuery } from '../lib/data.ts'
 import { useHashParam } from '../lib/hashParams.ts'
-import { DateField, dateLabel, EventList, Loading, StateToken } from './shared.tsx'
+import { DateField, dateLabel, EventList, eventHref, eventSubject, Loading, StateToken } from './shared.tsx'
 
 const format = (date: string, options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', ...options }).format(new Date(date))
@@ -28,6 +28,7 @@ const kindTokens = {
   exit: { label: 'Départ', color: 'orange' },
   inspection_entry: { label: 'EDL entrée', color: 'purple' },
   inspection_exit: { label: 'EDL sortie', color: 'purple' },
+  intervention: { label: 'Intervention', color: 'blue' },
 } as const
 const weekdays = Array.from({ length: 7 }, (_, index) => addDays('2026-01-05', index))
 const MONTH_VISIBLE = 3
@@ -140,8 +141,8 @@ function DayCell({
             {visible.map((event) => (
               <ListItem
                 key={event.id}
-                href={'#lots/' + event.lotId}
-                label={`Lot ${event.lotNumber}${event.time ? ' · ' + event.time : ''}`}
+                href={eventHref(event)}
+                label={`${eventSubject(event)}${event.time ? ' · ' + event.time : ''}`}
                 description={
                   <VStack gap={1}>
                     <HStack gap={1} wrap="wrap">
@@ -195,7 +196,7 @@ export function Calendar() {
       header={
         <VStack gap={2}>
           <Heading level={1}>Calendrier</Heading>
-          <Text color="secondary">Entrées, départs et états des lieux · heure de Paris.</Text>
+          <Text color="secondary">Entrées, départs, états des lieux et interventions · heure de Paris.</Text>
         </VStack>
       }
     >

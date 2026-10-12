@@ -24,8 +24,8 @@ const DAY = 86400000
 const encoder = new TextEncoder()
 const hex = (bytes: ArrayBuffer) =>
   Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, '0')).join('')
-const hashToken = (token: string) =>
-  Effect.promise(async () => hex(await crypto.subtle.digest('SHA-256', encoder.encode(token))))
+export const tokenDigest = async (token: string) => hex(await crypto.subtle.digest('SHA-256', encoder.encode(token)))
+const hashToken = (token: string) => Effect.promise(() => tokenDigest(token))
 const passwordHash = (password: string, salt: string) =>
   Effect.promise(async () => {
     const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])

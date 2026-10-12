@@ -4,17 +4,16 @@ import { Breadcrumbs, BreadcrumbItem } from '@astryxdesign/core/Breadcrumbs'
 import { Button } from '@astryxdesign/core/Button'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
-import { Layout, LayoutContent, LayoutHeader } from '@astryxdesign/core/Layout'
-import { List, ListItem } from '@astryxdesign/core/List'
+import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from '@astryxdesign/core/Layout'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { SideNav, SideNavCollapseButton, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
-import { VStack } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TopNav } from '@astryxdesign/core/TopNav'
-import { ArrowLeft, PanelLeftClose, PanelLeftOpen, UserRound } from 'lucide-react'
+import { ArrowLeft, PanelLeftClose, PanelLeftOpen, Sparkles, UserRound } from 'lucide-react'
 import { Auth } from '../features/Auth.tsx'
 import { Calendar } from '../features/Calendar.tsx'
 import { Cleaning, CleaningTaskDetail, CleaningTemplateDetail, CleaningTemplates } from '../features/Cleaning.tsx'
+import { Ideas } from '../features/Ideas.tsx'
 import { LotDetail } from '../features/LotDetail.tsx'
 import { Lots } from '../features/Lots.tsx'
 import { MeterDetail, Meters } from '../features/Meters.tsx'
@@ -22,14 +21,23 @@ import { Revenue, RevenueSourceDetail, RevenueYear } from '../features/Revenue.t
 import { Stock, StockDetail } from '../features/Stock.tsx'
 import { Overview } from '../features/Overview.tsx'
 import { Reports } from '../features/Reports.tsx'
+import {
+  TechnicalIssues,
+  TechnicalPlaces,
+  TechnicalSupplier,
+  TechnicalSuppliers,
+  TechnicalWork,
+  TechnicalWorks,
+} from '../features/Technical.tsx'
+import { Studio } from '../features/Studio.tsx'
 import { Team } from '../features/Team.tsx'
 import { Feedback, Loading, roleLabels } from '../features/shared.tsx'
 import { call, SESSION_EXPIRED } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
-import { CommandMenu } from './CommandMenu.tsx'
+import { CommandBar } from '../command/CommandBar.tsx'
 import { useCrumb } from './crumb.ts'
 import { PageLayout } from './PageLayout.tsx'
-import { sections } from './sections.ts'
+import { navGroups, sections } from './sections.ts'
 import { ThemeSelector, type ThemeMode } from './ThemeSelector.tsx'
 
 const subscribe = (notify: () => void) => {
@@ -44,6 +52,7 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
     auth = useQuery('auth', load),
     mutation = useMutation(),
     [isNavCollapsed, setIsNavCollapsed] = useState(false),
+    [isStudioOpen, setIsStudioOpen] = useState(false),
     crumb = useCrumb()
   const { refresh: refreshAuth } = auth
   useEffect(() => {
@@ -76,7 +85,7 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
     section = sections.find((item) => item.id === destination) ?? sections[0]
   const visible = sections.filter((item) =>
     me.role === 'cleaner'
-      ? ['overview', 'lots', 'calendar', 'cleaning'].includes(item.id)
+      ? ['overview', 'lots', 'calendar', 'cleaning', 'ideas'].includes(item.id)
       : item.id !== 'team' || me.role === 'admin',
   )
   const allowed =
@@ -129,26 +138,30 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
     ) : (
       <Revenue />
     )
+  ) : section.id === 'technical' ? (
+    id === 'travaux' && sub ? (
+      <TechnicalWork key={sub} id={sub} />
+    ) : id === 'signalements' ? (
+      <TechnicalIssues />
+    ) : id === 'fournisseurs' ? (
+      sub ? (
+        <TechnicalSupplier key={sub} id={sub} />
+      ) : (
+        <TechnicalSuppliers />
+      )
+    ) : id === 'lieux' ? (
+      <TechnicalPlaces />
+    ) : (
+      <TechnicalWorks key={query} />
+    )
   ) : section.id === 'reports' ? (
     <Reports />
   ) : section.id === 'team' ? (
     <Team me={me} />
+  ) : section.id === 'ideas' ? (
+    <Ideas me={me} />
   ) : (
-    <PageLayout
-      header={
-        <VStack gap={1}>
-          <Heading level={1}>{section.label}</Heading>
-          <Text color="secondary">{section.description}</Text>
-        </VStack>
-      }
-    >
-      <Text color="secondary">Cet espace sera construit après cette première V1.</Text>
-      <List hasDividers header={<Heading level={2}>Besoins retenus</Heading>}>
-        {section.items.map(([label, description]) => (
-          <ListItem key={label} label={label} description={description} />
-        ))}
-      </List>
-    </PageLayout>
+    <Overview me={me} />
   )
   return (
     <AppShell
@@ -162,23 +175,43 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
           collapsible={{ isCollapsed: isNavCollapsed, onCollapsedChange: setIsNavCollapsed, hasButton: false }}
           header={<SideNavHeading heading="GResidence" subheading={me.residenceName} headingHref="#overview" />}
           resizable={{ defaultWidth: 240, minWidth: 200, maxWidth: 320 }}
+          footer={
+            <SideNavSection title="Retours" isHeaderHidden>
+              {visible
+                .filter((item) => item.group === 'feedback')
+                .map((item) => (
+                  <SideNavItem
+                    key={item.id}
+                    label={item.label}
+                    icon={item.icon}
+                    href={'#' + item.id}
+                    isSelected={item.id === section.id}
+                  />
+                ))}
+            </SideNavSection>
+          }
           footerIcons={
             <SideNavCollapseButton>
               <Icon icon={isNavCollapsed ? PanelLeftOpen : PanelLeftClose} />
             </SideNavCollapseButton>
           }
         >
-          <SideNavSection title="Rubriques" isHeaderHidden>
-            {visible.map((item) => (
-              <SideNavItem
-                key={item.id}
-                label={item.label}
-                icon={item.icon}
-                href={'#' + item.id}
-                isSelected={item.id === section.id}
-              />
-            ))}
-          </SideNavSection>
+          {navGroups.map((group) => {
+            const items = visible.filter((item) => item.group === group.id)
+            return items.length ? (
+              <SideNavSection key={group.id} title={group.title} isHeaderHidden={group.isHeaderHidden}>
+                {items.map((item) => (
+                  <SideNavItem
+                    key={item.id}
+                    label={item.label}
+                    icon={item.icon}
+                    href={'#' + item.id}
+                    isSelected={item.id === section.id}
+                  />
+                ))}
+              </SideNavSection>
+            ) : null
+          })}
         </SideNav>
       }
     >
@@ -213,7 +246,14 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
               }
               endContent={
                 <>
-                  <CommandMenu destinations={visible} />
+                  <Button
+                    label={isStudioOpen ? 'Fermer AI Studio' : 'Ouvrir AI Studio'}
+                    variant={isStudioOpen ? 'secondary' : 'ghost'}
+                    isIconOnly
+                    icon={<Icon icon={Sparkles} />}
+                    onClick={() => setIsStudioOpen((open) => !open)}
+                  />
+                  <CommandBar me={me} destinations={visible} />
                   <ThemeSelector mode={themeMode} onChange={onThemeChange} />
                   <MoreMenu
                     label={'Compte de ' + me.name + ' · ' + roleLabels[me.role]}
@@ -244,6 +284,13 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
           </LayoutHeader>
         }
         content={content}
+        end={
+          isStudioOpen ? (
+            <LayoutPanel hasDivider width={400} padding={0} isScrollable={false} role="complementary" label="AI Studio">
+              <Studio route={route} onClose={() => setIsStudioOpen(false)} />
+            </LayoutPanel>
+          ) : undefined
+        }
       />
     </AppShell>
   )

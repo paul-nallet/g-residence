@@ -5,13 +5,16 @@ export const Event = Schema.Struct({
   id: Schema.String,
   lotId: Schema.String,
   lotNumber: Schema.String,
-  kind: Schema.Literals(['entry', 'exit', 'inspection_entry', 'inspection_exit']),
+  kind: Schema.Literals(['entry', 'exit', 'inspection_entry', 'inspection_exit', 'intervention']),
   date: Schema.String,
   time: Schema.String,
   duration: Schema.Number,
   status: Schema.String,
   resident: Schema.String,
   comment: Schema.String,
+  workId: Schema.optionalKey(Schema.String),
+  title: Schema.optionalKey(Schema.String),
+  place: Schema.optionalKey(Schema.String),
 })
 export type Event = typeof Event.Type
 export const ReportRow = Schema.Struct({

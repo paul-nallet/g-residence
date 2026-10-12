@@ -27,6 +27,8 @@ import {
   CleaningTemplate,
   CleaningTemplateInput,
 } from '../domain/cleaning.ts'
+import { FeedbackInput, FeedbackPage, FeedbackQuery } from '../domain/feedback.ts'
+import { SyncState } from '../domain/sync.ts'
 import { Building, BuildingInput, LotDetail, LotInput, LotPage, LotQuery } from '../domain/lots.ts'
 import { ConsumptionYear, Meter, MeterInput, MeterPage, ReadingInput, ReadingPage } from '../domain/meters.ts'
 import {
@@ -41,6 +43,7 @@ import {
 } from '../domain/revenue.ts'
 import { CivilDate, CivilMonth, Health, Ok, PageNumber } from '../domain/shared.ts'
 import { InspectionInput, NoticeInput, StayAction, StayInput } from '../domain/stays.ts'
+import { StudioInput, StudioReply, StudioStatus } from '../domain/studio.ts'
 import {
   MovementInput,
   MovementPage,
@@ -52,6 +55,26 @@ import {
   StockPage,
   StockViewInput,
 } from '../domain/stock.ts'
+import {
+  InterventionInput,
+  IssueInput,
+  IssuePage,
+  IssueQuery,
+  NoteInput,
+  Place,
+  PlaceInput,
+  Supplier,
+  SupplierInput,
+  SupplierPage,
+  SupplierQuery,
+  TechnicalOptions,
+  WorkAction,
+  WorkCreate,
+  WorkDetail,
+  WorkInput,
+  WorkPage,
+  WorkQuery,
+} from '../domain/technical.ts'
 
 export class BadRequest extends Schema.TaggedError<BadRequest>()(
   'BadRequest',
@@ -82,6 +105,11 @@ export class TooManyRequests extends Schema.TaggedError<TooManyRequests>()(
   'TooManyRequests',
   { error: Schema.String },
   { httpApiStatus: 429 },
+) {}
+export class ServiceUnavailable extends Schema.TaggedError<ServiceUnavailable>()(
+  'ServiceUnavailable',
+  { error: Schema.String },
+  { httpApiStatus: 503 },
 ) {}
 export const errors = [BadRequest, Unauthorized, Forbidden, NotFound, Conflict, TooManyRequests] as const
 const invalidData = 'Données invalides.'
@@ -447,6 +475,98 @@ export class CleaningGroup extends HttpApiGroup.make('cleaning')
     HttpApiEndpoint.delete('removeItem', '/cleaning/items/:id', { params: id, success: Ok, error: errors }),
   )
   .middleware(Authorization) {}
+const Created = Schema.Struct({ id: Schema.String })
+export class TechnicalGroup extends HttpApiGroup.make('technical')
+  .add(
+    HttpApiEndpoint.get('options', '/technical/options', { success: TechnicalOptions, error: errors }),
+    HttpApiEndpoint.get('places', '/technical/places', { success: Schema.Array(Place), error: errors }),
+    HttpApiEndpoint.post('createPlace', '/technical/places', { payload: PlaceInput, success: Created, error: errors }),
+    HttpApiEndpoint.patch('updatePlace', '/technical/places/:id', {
+      params: id,
+      payload: PlaceInput,
+      success: Created,
+      error: errors,
+    }),
+    HttpApiEndpoint.get('suppliers', '/technical/suppliers', {
+      query: SupplierQuery,
+      success: SupplierPage,
+      error: errors,
+    }),
+    HttpApiEndpoint.get('supplier', '/technical/suppliers/:id', { params: id, success: Supplier, error: errors }),
+    HttpApiEndpoint.post('createSupplier', '/technical/suppliers', {
+      payload: SupplierInput,
+      success: Created,
+      error: errors,
+    }),
+    HttpApiEndpoint.patch('updateSupplier', '/technical/suppliers/:id', {
+      params: id,
+      payload: SupplierInput,
+      success: Created,
+      error: errors,
+    }),
+    HttpApiEndpoint.get('issues', '/technical/issues', { query: IssueQuery, success: IssuePage, error: errors }),
+    HttpApiEndpoint.post('createIssue', '/technical/issues', { payload: IssueInput, success: Created, error: errors }),
+    HttpApiEndpoint.patch('updateIssue', '/technical/issues/:id', {
+      params: id,
+      payload: IssueInput,
+      success: Created,
+      error: errors,
+    }),
+    HttpApiEndpoint.get('works', '/technical/works', { query: WorkQuery, success: WorkPage, error: errors }),
+    HttpApiEndpoint.get('work', '/technical/works/:id', { params: id, success: WorkDetail, error: errors }),
+    HttpApiEndpoint.post('createWork', '/technical/works', { payload: WorkCreate, success: Created, error: errors }),
+    HttpApiEndpoint.patch('updateWork', '/technical/works/:id', {
+      params: id,
+      payload: WorkInput,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('actWork', '/technical/works/:id/actions', {
+      params: id,
+      payload: WorkAction,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('addNote', '/technical/works/:id/notes', {
+      params: id,
+      payload: NoteInput,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('createIntervention', '/technical/works/:id/interventions', {
+      params: id,
+      payload: InterventionInput,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.patch('updateIntervention', '/technical/interventions/:id', {
+      params: id,
+      payload: InterventionInput,
+      success: Ok,
+      error: errors,
+    }),
+  )
+  .middleware(Management)
+  .middleware(Authorization) {}
+export class FeedbackGroup extends HttpApiGroup.make('feedback')
+  .add(
+    HttpApiEndpoint.get('list', '/feedback', { query: FeedbackQuery, success: FeedbackPage, error: errors }),
+    HttpApiEndpoint.post('create', '/feedback', { payload: FeedbackInput, success: Ok, error: errors }),
+  )
+  .middleware(Authorization) {}
+export class SyncGroup extends HttpApiGroup.make('sync')
+  .add(HttpApiEndpoint.get('state', '/sync', { success: SyncState, error: errors }))
+  .middleware(Authorization) {}
+export class StudioGroup extends HttpApiGroup.make('studio')
+  .add(
+    HttpApiEndpoint.get('status', '/studio', { success: StudioStatus, error: errors }),
+    HttpApiEndpoint.post('ask', '/studio/messages', {
+      payload: StudioInput,
+      success: StudioReply,
+      error: [...errors, ServiceUnavailable],
+    }),
+  )
+  .middleware(Authorization) {}
 export class Api extends HttpApi.make('gresidence')
   .add(SystemGroup)
   .add(AuthGroup)
@@ -462,4 +582,8 @@ export class Api extends HttpApi.make('gresidence')
   .add(StockGroup)
   .add(RevenueGroup)
   .add(CleaningGroup)
+  .add(TechnicalGroup)
+  .add(FeedbackGroup)
+  .add(StudioGroup)
+  .add(SyncGroup)
   .prefix('/api') {}

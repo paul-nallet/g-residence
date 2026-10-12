@@ -25,7 +25,7 @@ import {
   StockViewNotFound,
   uniqueCategoryNames,
 } from '../domain/stock.ts'
-import { onViolation, sql, Sql } from './Database.ts'
+import { folded, onViolation, searchPattern, sql, Sql } from './Database.ts'
 
 type ItemRow = Omit<StockItem, 'categories'> & { categories: string }
 const level = `CASE WHEN i.quantity=0 THEN 'out' WHEN i.quantity<=i.threshold THEN 'low' ELSE 'ok' END`
@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
   }) {
     const me = yield* manager
     const start = ((input.page ?? 1) - 1) * PAGE_SIZE
-    const search = '%' + (input.q ?? '').trim().replace(/[\\%_]/g, '\\$&') + '%'
+    const search = searchPattern(input.q)
     const category = input.category ?? '',
       view = input.view ?? ''
     const inCategory = `(?='' OR EXISTS(SELECT 1 FROM stock_item_categories l WHERE l.item_id=i.id AND l.residence_id=i.residence_id AND l.category_id=?))`
@@ -139,8 +139,8 @@ const make = Effect.gen(function* () {
         WHERE l.item_id=i.id AND l.residence_id=i.residence_id AND v.view_id=?))`
     const scope = `i.residence_id=? AND ${inView} AND ${inCategory}`
     const scopeValues = [me.residenceId, view, view, category, category]
-    const filter = `${scope} AND (i.name LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM stock_item_categories l JOIN stock_categories c ON c.id=l.category_id
-        WHERE l.item_id=i.id AND l.residence_id=i.residence_id AND c.name LIKE ? ESCAPE '\\')) AND (?='all' OR ${level}<>'ok')`
+    const filter = `${scope} AND (${folded('i.name')} LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM stock_item_categories l JOIN stock_categories c ON c.id=l.category_id
+        WHERE l.item_id=i.id AND l.residence_id=i.residence_id AND ${folded('c.name')} LIKE ? ESCAPE '\\')) AND (?='all' OR ${level}<>'ok')`
     const values = [...scopeValues, search, search, input.level ?? 'all']
     const [rows, count, low, categories, views] = yield* Effect.all([
       db.all<ItemRow>(

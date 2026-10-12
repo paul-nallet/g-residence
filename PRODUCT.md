@@ -105,3 +105,21 @@ Une tâche relie un lot actif, un agent (membre actif de l’équipe, quel que s
 
 L’agent de ménage ne voit que ses propres tâches, en vue jour par défaut, et ne gère ni les fiches ni le planning. Les gestionnaires voient le planning par jour ou semaine, filtrable par agent. Hors périmètre : rattachement automatique au stock, création de signalement technique depuis une anomalie, récurrence automatique du planning et intégration au bilan hebdomadaire.
 
+
+## Technique : lieux, fournisseurs, signalements et travaux
+
+Extension demandée le 11 octobre 2026 : rendre concret le suivi technique. Administrateurs et gestionnaires uniquement, dans la résidence autorisée ; l’agent de ménage ne voit pas la rubrique ni les interventions au calendrier.
+
+Lieux : tout lot non archivé est directement un lieu, sans saisie supplémentaire. On crée en plus des lieux libres pour les parties communes ou techniques (Hall, Chaufferie, Toiture…) : nom unique sans distinction de casse, bâtiment et description facultatifs. Un lieu libre se renomme et s’archive ; il n’est jamais supprimé, pour garder l’historique des travaux.
+
+Fournisseurs : les prestataires qui interviennent. Nom unique sans distinction de casse, métiers en texte libre (Plomberie, Électricité…), contact, téléphone, email et notes facultatifs. Archivable, jamais supprimé ; un fournisseur archivé n’est plus proposé mais reste visible sur les travaux passés.
+
+Signalements : une anomalie constatée (capot manquant, trace au mur…), avec titre, description facultative, date de constat non future et zéro ou un lieu (lot ou lieu libre). Sans lieu, le signalement concerne les parties communes en général. États ouvert, résolu et classé sans suite. Un signalement ouvert peut donner naissance à des travaux : il y reste lié et reprend son lieu.
+
+Travaux : titre, description facultative, un ou plusieurs lieux et zéro, un ou plusieurs fournisseurs (un chantier « à planifier » peut ne pas encore en avoir). Statuts à planifier, planifié, en cours, terminé et annulé. Dates prévues de début et de fin facultatives, fin après début. Passer en cours enregistre la date réelle de début, terminer la date réelle de fin ; ces dates ne sont pas dans le futur. Un chantier terminé ou annulé peut être rouvert.
+
+Journal : chaque chantier garde un fil daté et signé, jamais effacé. On y ajoute des notes d’avancement ou des problèmes rencontrés ; chaque changement de statut y est inscrit automatiquement. Les modifications du chantier sont tracées avant/après côté serveur.
+
+Interventions : rendez-vous techniques rattachés à un chantier, avec date et heure (Europe/Paris, heures ambiguës ou inexistantes rejetées), durée, fournisseur facultatif parmi ceux du chantier, état prévu, réalisé ou annulé et compte rendu. Elles apparaissent au calendrier des gestionnaires et dans les prochains rendez-vous des lots concernés.
+
+Listes filtrables par statut et recherche, paginées côté API ; les travaux non terminés et les signalements ouverts sont listés en premier. Hors périmètre : photos, documents, devis et factures, montants, notifications et intégration au bilan hebdomadaire.
