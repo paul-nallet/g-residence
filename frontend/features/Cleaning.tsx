@@ -1,3 +1,5 @@
+import type { Priority } from '../../src/domain/priority.ts'
+import { PriorityField, PriorityFilter, PriorityToken, type PriorityFilterValue } from './priority.tsx'
 import { useCallback, useState } from 'react'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Button } from '@astryxdesign/core/Button'
@@ -91,6 +93,7 @@ function PlanEditor({
     [agent, setAgent] = useState(options.agents[0]?.id ?? ''),
     [date, setDate] = useState(day),
     [template, setTemplate] = useState(''),
+    [priority, setPriority] = useState<Priority>('normal'),
     [note, setNote] = useState('')
   const mutation = useMutation()
   const fallback = options.templates.find((item) => item.is_default)
@@ -113,7 +116,7 @@ function PlanEditor({
           () =>
             call((client) =>
               client.cleaning.create({
-                payload: { lot_ids: lots, agent_id: agent, day: date, template_id: template, note },
+                payload: { lot_ids: lots, agent_id: agent, day: date, template_id: template, note, priority },
               }),
             ),
           () => saved(lots.length),
@@ -144,6 +147,7 @@ function PlanEditor({
         }))}
       />
       <DateField label="Jour" value={date} onChange={setDate} />
+      <PriorityField value={priority} onChange={setPriority} />
       <Selector
         label="Fiche de ménage"
         value={template || 'lot'}
@@ -187,7 +191,9 @@ export function CommentIcon({ comments }: { comments: readonly string[] }) {
       content={
         <VStack gap={1}>
           {comments.map((comment, index) => (
-            <Text key={index}>{comment}</Text>
+            <Text key={index} color="inherit">
+              {comment}
+            </Text>
           ))}
         </VStack>
       }
@@ -290,7 +296,8 @@ function TaskList({
               .filter(Boolean)
               .join(' · ')}
             endContent={
-              <HStack gap={2} vAlign="center">
+              <HStack gap={2} vAlign="center" wrap="wrap">
+                <PriorityToken priority={task.priority} />
                 {task.issues > 0 && (
                   <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
                 )}
@@ -386,6 +393,12 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
               ),
             },
             {
+              key: 'priority',
+              header: 'Priorité',
+              width: proportional(1),
+              renderCell: (task) => <PriorityToken priority={task.priority} />,
+            },
+            {
               key: 'status',
               header: 'Statut',
               width: proportional(1),
@@ -418,6 +431,7 @@ export function Cleaning({ me }: { me: Me }) {
   const manager = me.role !== 'cleaner'
   const [date, setDate] = useHashParam('date', today()),
     [agent, setAgent] = useHashParam('agent', ''),
+    [priority, setPriority] = useState<PriorityFilterValue>('all'),
     [view, setView] = useHashParam('vue', manager ? 'week' : 'day'),
     [planning, setPlanning] = useState(false),
     [moving, setMoving] = useState<{ date: string; tasks: readonly CleaningTask[] } | null>(null),
@@ -427,10 +441,15 @@ export function Cleaning({ me }: { me: Me }) {
     to = week ? addDays(from, 6) : date,
     step = week ? 7 : 1
   const load = useCallback(
-    () => call((client) => client.cleaning.tasks({ query: { from, to, ...(agent ? { agent } : {}) } })),
-    [from, to, agent],
+    () =>
+      call((client) =>
+        client.cleaning.tasks({
+          query: { from, to, ...(agent ? { agent } : {}), ...(priority !== 'all' ? { priority } : {}) },
+        }),
+      ),
+    [from, to, agent, priority],
   )
-  const result = useQuery(`cleaning:${from}:${to}:${agent}`, load)
+  const result = useQuery(`cleaning:${from}:${to}:${agent}:${priority}`, load)
   const options = useQuery<CleaningOptions | null>(manager ? 'cleaning-options' : '', manager ? loadOptions : noOptions)
   const tasks = result.data ?? []
   const active = tasks.filter((task) => task.status !== 'cancelled')
@@ -486,7 +505,7 @@ export function Cleaning({ me }: { me: Me }) {
             )}
           </VStack>
         </HStack>
-        <HStack gap={2} wrap="wrap" vAlign="center">
+        <HStack gap={2} wrap="wrap" vAlign="end">
           <DateField
             label="Aller à la date"
             labelHidden
@@ -507,6 +526,7 @@ export function Cleaning({ me }: { me: Me }) {
               ]}
             />
           )}
+          <PriorityFilter value={priority} onChange={setPriority} isLabelHidden />
           <SegmentedControl label="Vue" value={view} onChange={setView}>
             <SegmentedControlItem value="day" label="Jour" />
             <SegmentedControlItem value="week" label="Semaine" />
@@ -565,7 +585,8 @@ function TaskEditor({
 }) {
   const [agent, setAgent] = useState(task.agent_id),
     [day, setDay] = useState(task.day),
-    [note, setNote] = useState(task.note)
+    [note, setNote] = useState(task.note),
+    [priority, setPriority] = useState<Priority>(task.priority)
   const mutation = useMutation()
   return (
     <Editor
@@ -578,7 +599,7 @@ function TaskEditor({
         void mutation.run(
           () =>
             call((client) =>
-              client.cleaning.update({ params: { id: task.id }, payload: { agent_id: agent, day, note } }),
+              client.cleaning.update({ params: { id: task.id }, payload: { agent_id: agent, day, note, priority } }),
             ),
           saved,
         )
@@ -595,6 +616,7 @@ function TaskEditor({
         }))}
       />
       <DateField label="Jour" value={day} onChange={setDay} />
+      <PriorityField value={priority} onChange={setPriority} />
       <TextArea label="Consigne pour l’agent" value={note} onChange={setNote} isOptional />
     </Editor>
   )
@@ -824,6 +846,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
             <HStack gap={2} vAlign="center" wrap="wrap">
               <Heading level={1}>{lotLabel({ number: task.lot_number, building_name: task.building_name })}</Heading>
               <StateToken state={task.status} />
+              <PriorityToken priority={task.priority} />
             </HStack>
             <Text>
               {dayLabel(task.day)} · {task.agent_name} · {task.template_name || 'Sans fiche'}
@@ -837,7 +860,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
                 presentation="adaptive"
                 isDisabled={mutation.busy || !options.data}
                 items={[
-                  { label: 'Modifier l’agent, le jour ou la consigne', onClick: () => setDialog('edit') },
+                  { label: 'Modifier la tâche', onClick: () => setDialog('edit') },
                   { label: 'Ajouter un point', onClick: () => setDialog('point') },
                   { type: 'divider' },
                   { label: 'Annuler la tâche', variant: 'destructive', onClick: () => setDialog('cancel') },

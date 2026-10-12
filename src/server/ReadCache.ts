@@ -65,6 +65,11 @@ export const withReadCache =
       .first<{ user: string; version: number }>(stamp(await tokenDigest(token), now()))
       .catch(() => null)
     if (!current) return handle(request)
+    if (url.pathname === '/api/sync')
+      return Response.json(
+        { version: current.version },
+        { headers: { 'cache-control': 'no-store', 'x-cache': 'stamp' } },
+      )
     const key = [current.user, current.version, url.pathname + url.search].join('|')
     const hit = cache.get(key)
     if (hit) return new Response(hit.body, { status: 200, headers: withCacheHeader(hit.headers, 'hit') })

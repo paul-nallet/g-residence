@@ -13,6 +13,7 @@ import { InvalidInput } from '../domain/errors.ts'
 import type { Inspection, Notice, Stay } from '../domain/stays.ts'
 import { addDays, monday, parisDate, parisTime } from '../domain/rules.ts'
 import { sql, Sql } from './Database.ts'
+import { reportActivities } from './ReportActivities.ts'
 
 type Resident = { number: string; first_name: string; last_name: string }
 type Intervention = {
@@ -38,7 +39,7 @@ const make = Effect.gen(function* () {
       scope = lotId ? [me.residenceId, lotId] : [me.residenceId]
     const hidden = me.role === 'cleaner'
     const window = [addDays(from, -1) + 'T00:00:00.000Z', addDays(to, 1) + 'T23:00:00.000Z'] as const
-    const [stays, inspections, interventions] = yield* Effect.all([
+    const [stays, inspections, interventions, visits] = yield* Effect.all([
       db.all<Stay & { number: string }>(
         sql(
           `SELECT s.*,l.number FROM stays s JOIN lots l ON l.id=s.lot_id WHERE s.residence_id=? AND s.cancelled=0 ${restriction} AND (s.planned_start BETWEEN ? AND ? OR s.planned_end BETWEEN ? AND ?)`,
@@ -70,6 +71,16 @@ const make = Effect.gen(function* () {
               me.residenceId,
               ...window,
               ...(lotId ? [lotId] : []),
+            ),
+          ),
+      hidden || lotId
+        ? Effect.succeed([])
+        : db.all<{ id: string; name: string; building: string; scheduled_on: string; status: string; report: string }>(
+            sql(
+              `SELECT v.id,v.name,b.name AS building,v.scheduled_on,v.status,v.report FROM technical_visits v JOIN buildings b ON b.id=v.building_id WHERE v.residence_id=? AND v.scheduled_on BETWEEN ? AND ?`,
+              me.residenceId,
+              from,
+              to,
             ),
           ),
     ])
@@ -109,10 +120,26 @@ const make = Effect.gen(function* () {
         place: intervention.place ?? '',
       })
     }
+    for (const visit of visits)
+      events.push({
+        id: visit.id,
+        visitId: visit.id,
+        kind: 'technical_visit',
+        lotId: '',
+        lotNumber: '',
+        date: visit.scheduled_on,
+        time: '',
+        duration: 0,
+        status: visit.status,
+        resident: '',
+        comment: visit.report,
+        title: visit.name,
+        place: visit.building,
+      })
     return sortEvents(events)
   })
 
-  const report = Effect.fn('Agenda.report')(function* (date: string) {
+  const report = Effect.fn('Agenda.report')(function* (date: string, page?: number) {
     const me = yield* manager
     const from = monday(date),
       to = addDays(from, 6)
@@ -154,9 +181,19 @@ const make = Effect.gen(function* () {
           ...(within(stay.actual_end)
             ? [{ date: stay.actual_end, kind: 'Sortie réelle', lot: stay.number, comment: '' }]
             : []),
-        ].map((row) => ({ ...row, lastName: stay.last_name, firstName: stay.first_name })),
+        ].map((row) => ({
+          ...row,
+          module: 'Mouvements',
+          subject: '',
+          actor: '',
+          lastName: stay.last_name,
+          firstName: stay.first_name,
+        })),
       ),
       ...notices.map((notice) => ({
+        module: 'Mouvements',
+        subject: '',
+        actor: '',
         date: notice.received_on,
         lot: notice.number,
         kind: 'Préavis reçu',
@@ -165,6 +202,9 @@ const make = Effect.gen(function* () {
         comment: `Départ prévu : ${notice.departure_on}${notice.comment ? ' — ' + notice.comment : ''}`,
       })),
       ...inspections.map((inspection) => ({
+        module: 'Mouvements',
+        subject: '',
+        actor: '',
         date: inspection.completed_on!,
         lot: inspection.number,
         kind: inspection.kind === 'entry' ? 'État des lieux d’entrée réalisé' : 'État des lieux de sortie réalisé',
@@ -173,7 +213,8 @@ const make = Effect.gen(function* () {
         comment: inspection.comment,
       })),
     ]
-    return reportOf(from, to, rows)
+    rows.push(...(yield* reportActivities(db, me, from, to)))
+    return reportOf(from, to, rows, page)
   })
 
   return { calendar, report }

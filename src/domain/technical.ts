@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { Priority } from './priority.ts'
 import type { InvalidInput } from './errors.ts'
 import { CivilDate, IntegerBetween, LocalDateTime, OptionalText, PageNumber, RequiredText } from './shared.ts'
 
@@ -73,6 +74,7 @@ export const SupplierPage = Schema.Struct({ items: Schema.Array(Supplier), total
 export const IssueStatus = Schema.Literals(['open', 'resolved', 'dismissed'])
 export type IssueStatus = typeof IssueStatus.Type
 export const IssueInput = Schema.Struct({
+  priority: Schema.optionalKey(Priority),
   title: RequiredText('Titre du signalement'),
   description: OptionalText(2000),
   reported_on: CivilDate,
@@ -80,6 +82,7 @@ export const IssueInput = Schema.Struct({
   status: IssueStatus,
 })
 export const Issue = Schema.Struct({
+  priority: Priority,
   id: Schema.String,
   title: Schema.String,
   description: Schema.String,
@@ -92,6 +95,7 @@ export const Issue = Schema.Struct({
 })
 export type Issue = typeof Issue.Type
 export const IssueQuery = {
+  priority: Schema.optionalKey(Priority),
   q: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(
     Schema.Literals(['all', ...IssueStatus.literals]).annotate({ message: 'Filtre invalide.' }),
@@ -105,6 +109,7 @@ export type WorkState = typeof WorkState.Type
 export const WorkStatus = Schema.Literals(['to_plan', 'planned', 'in_progress', 'done', 'cancelled'])
 export type WorkStatus = typeof WorkStatus.Type
 export const WorkInput = Schema.Struct({
+  priority: Schema.optionalKey(Priority),
   title: RequiredText('Titre des travaux'),
   description: OptionalText(4000),
   locations: Schema.Array(LocationRef).check(
@@ -132,6 +137,7 @@ const workDates = {
   actual_end: Schema.NullOr(Schema.String),
 }
 export const WorkSummary = Schema.Struct({
+  priority: Priority,
   id: Schema.String,
   title: Schema.String,
   status: WorkStatus,
@@ -146,6 +152,7 @@ export const WorkFilter = Schema.Literals(['active', 'all', ...WorkStatus.litera
 })
 export type WorkFilter = typeof WorkFilter.Type
 export const WorkQuery = {
+  priority: Schema.optionalKey(Priority),
   q: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(WorkFilter),
   location: Schema.optionalKey(OptionalLocationRef),
@@ -186,6 +193,7 @@ export const Intervention = Schema.Struct({
 })
 export type Intervention = typeof Intervention.Type
 export const WorkDetail = Schema.Struct({
+  priority: Priority,
   id: Schema.String,
   title: Schema.String,
   description: Schema.String,

@@ -29,6 +29,7 @@ const kindTokens = {
   inspection_entry: { label: 'EDL entrée', color: 'purple' },
   inspection_exit: { label: 'EDL sortie', color: 'purple' },
   intervention: { label: 'Intervention', color: 'blue' },
+  technical_visit: { label: 'Visite technique', color: 'blue' },
 } as const
 const weekdays = Array.from({ length: 7 }, (_, index) => addDays('2026-01-05', index))
 const MONTH_VISIBLE = 3

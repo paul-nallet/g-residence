@@ -1,5 +1,4 @@
 import type { FormEvent, ReactNode } from 'react'
-import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { ButtonGroup } from '@astryxdesign/core/ButtonGroup'
 import { DateInput } from '@astryxdesign/core/DateInput'
@@ -10,12 +9,14 @@ import { Icon } from '@astryxdesign/core/Icon'
 import { List, ListItem } from '@astryxdesign/core/List'
 import { Selector } from '@astryxdesign/core/Selector'
 import { VStack, HStack, StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Event } from '../../src/domain/agenda.ts'
 import type { Role } from '../../src/domain/accounts.ts'
 import { today } from '../../src/domain/rules.ts'
+import { Feedback, roleLabels } from './status.tsx'
+
+export { Feedback, Loading, roleLabels } from './status.tsx'
 
 export const dateLabel = (date: string) =>
   date
@@ -29,14 +30,18 @@ export const kindLabels = {
   inspection_entry: 'État des lieux d’entrée',
   inspection_exit: 'État des lieux de sortie',
   intervention: 'Intervention technique',
+  technical_visit: 'Visite technique',
 }
 export const eventSubject = (event: Event) =>
-  event.kind === 'intervention'
+  event.kind === 'intervention' || event.kind === 'technical_visit'
     ? (event.title ?? '') + (event.place ? ' · ' + event.place : '')
     : 'Lot ' + event.lotNumber
 export const eventHref = (event: Event) =>
-  event.kind === 'intervention' ? '#technical/travaux/' + event.workId : '#lots/' + event.lotId
-export const roleLabels = { admin: 'Administrateur', manager: 'Gestionnaire', cleaner: 'Ménage' }
+  event.kind === 'technical_visit'
+    ? '#visits/' + event.visitId
+    : event.kind === 'intervention'
+      ? '#technical/travaux/' + event.workId
+      : '#lots/' + event.lotId
 export const statusLabels = {
   planned: 'Prévu',
   done: 'Réalisé',
@@ -51,34 +56,6 @@ export function StateToken({ state }: { state: string }) {
       color={state === 'done' || state === 'occupied' ? 'green' : state === 'cancelled' ? 'gray' : 'blue'}
       size="sm"
     />
-  )
-}
-export function Feedback({ error, success }: { error?: string; success?: string }) {
-  return (
-    <>
-      {error && <Banner status="error" title={error} />}
-      {success && (
-        <Text as="p" role="status">
-          {success}
-        </Text>
-      )}
-    </>
-  )
-}
-export function Loading({ error, retry }: { error: string; retry: () => void }) {
-  return (
-    <VStack gap={3}>
-      {error ? (
-        <>
-          <Feedback error={error} />
-          <Button label="Réessayer" onClick={retry} />
-        </>
-      ) : (
-        <Text as="p" role="status">
-          Chargement…
-        </Text>
-      )}
-    </VStack>
   )
 }
 export function DateField({

@@ -80,7 +80,12 @@ describe('synchronisation', () => {
   test('la version suit les écritures de la résidence', async () => {
     const e = await environment()
     try {
-      const before = await version(await e.request('/sync', e.cookie))
+      const calls = e.calls()
+      const direct = await e.request('/sync', e.cookie)
+      assert.equal(direct.headers.get('x-cache'), 'stamp')
+      assert.equal(direct.headers.get('cache-control'), 'no-store')
+      assert.equal(e.calls(), calls)
+      const before = await version(direct)
       assert.equal((await e.request('/stock', e.cookie, 'POST', item)).status, 200)
       const after = await version(await e.request('/sync', e.cookie))
       assert.ok(after > before)

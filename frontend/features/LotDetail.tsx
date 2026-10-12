@@ -18,6 +18,7 @@ import { LotCleaning } from './Cleaning.tsx'
 import { OccupationsTable } from './OccupationsTable.tsx'
 import { LotEditor } from './Lots.tsx'
 import { InspectionEditor, NoticeEditor, StayActionEditor, StayEditor } from './StayEditors.tsx'
+import { Journal } from './journal.tsx'
 import { dateLabel, Editor, EventList, Feedback, Loading, StateToken } from './shared.tsx'
 
 type Edit =
@@ -296,19 +297,11 @@ export function LotDetail({ id, me }: { id: string; me: Me }) {
           aria-labelledby={panelPrefix + '-tab-history'}
           tabIndex={0}
         >
-          <List hasDividers header={<Heading level={2}>Historique des modifications</Heading>}>
-            {history.length ? (
-              history.map((item) => (
-                <ListItem
-                  key={item.id}
-                  label={item.action}
-                  description={`${dateLabel(parisDate(item.created_at))} à ${parisTime(item.created_at)} · ${item.actor}`}
-                />
-              ))
-            ) : (
-              <ListItem label="Aucune modification enregistrée." />
-            )}
-          </List>
+          <Journal
+            title="Historique des modifications"
+            empty="Aucune modification enregistrée."
+            entries={history.map((item) => ({ ...item, body: item.action }))}
+          />
         </VStack>
       )}
       {edit?.kind === 'lot' && <LotEditor lot={lot} close={() => setEdit(null)} saved={saved} />}

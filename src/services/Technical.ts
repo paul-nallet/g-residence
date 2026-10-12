@@ -1,3 +1,4 @@
+import type { Priority } from '../domain/priority.ts'
 import { Context, Effect, Layer } from 'effect'
 import type { Me } from '../domain/accounts.ts'
 import { currentDay, now } from '../domain/clock.ts'
@@ -66,7 +67,7 @@ const workLocations = `(SELECT json_group_array(label) FROM (SELECT ${labelOf} A
 const workSuppliers = `(SELECT json_group_array(name) FROM (SELECT s.name FROM work_suppliers ws JOIN suppliers s ON s.id=ws.supplier_id
   WHERE ws.work_id=w.id ORDER BY s.name COLLATE NOCASE))`
 const statusOf = `CASE WHEN w.state='open' THEN CASE WHEN w.planned_start IS NULL THEN 'to_plan' ELSE 'planned' END ELSE w.state END`
-const issueColumns = `i.id,i.title,i.description,i.reported_on,i.status,i.work_id,w.title AS work_title,u.name AS actor,
+const issueColumns = `i.id,i.title,i.description,i.reported_on,i.status,i.priority,i.work_id,w.title AS work_title,u.name AS actor,
   i.lot_id,l.number AS lot_number,l.archived AS lot_archived,i.place_id,p.name AS place_name,p.archived AS place_archived`
 const issueJoins = `FROM issues i JOIN users u ON u.id=i.created_by LEFT JOIN works w ON w.id=i.work_id
   LEFT JOIN lots l ON l.id=i.lot_id LEFT JOIN places p ON p.id=i.place_id`
@@ -386,20 +387,31 @@ const make = Effect.gen(function* () {
 
   const issues = Effect.fn('Technical.issues')(function* (input: {
     readonly q?: string
+    readonly priority?: Priority
     readonly status?: 'all' | IssueStatus
     readonly page?: number
   }) {
     const me = yield* manager
     const status = input.status ?? 'all',
       search = pattern(input.q)
-    const filter = `i.residence_id=? AND (?='all' OR i.status=?) AND (i.title LIKE ? ESCAPE '\\' OR i.description LIKE ? ESCAPE '\\'
+    const filter = `i.residence_id=? AND (?='all' OR i.status=?) AND (?='' OR i.priority=?) AND (i.title LIKE ? ESCAPE '\\' OR i.description LIKE ? ESCAPE '\\'
       OR ('Lot ' || l.number) LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')`
-    const values = [me.residenceId, status, status, search, search, search, search]
+    const values = [
+      me.residenceId,
+      status,
+      status,
+      input.priority ?? '',
+      input.priority ?? '',
+      search,
+      search,
+      search,
+      search,
+    ]
     const [rows, count, open] = yield* Effect.all([
       db.all<IssueRow>(
         sql(
           `SELECT ${issueColumns} ${issueJoins} WHERE ${filter}
-          ORDER BY i.status<>'open',i.reported_on DESC,i.created_at DESC LIMIT ? OFFSET ?`,
+          ORDER BY i.status<>'open',CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,i.reported_on DESC,i.created_at DESC,i.id LIMIT ? OFFSET ?`,
           ...values,
           PAGE_SIZE,
           ((input.page ?? 1) - 1) * PAGE_SIZE,
@@ -436,18 +448,19 @@ const make = Effect.gen(function* () {
       .batch([
         before
           ? sql(
-              'UPDATE issues SET title=?,description=?,reported_on=?,lot_id=?,place_id=?,status=? WHERE id=? AND residence_id=?',
+              'UPDATE issues SET title=?,description=?,reported_on=?,lot_id=?,place_id=?,status=?,priority=? WHERE id=? AND residence_id=?',
               input.title,
               input.description,
               input.reported_on,
               lotId,
               placeId,
               input.status,
+              input.priority ?? before.priority,
               issueId,
               me.residenceId,
             )
           : sql(
-              'INSERT INTO issues(id,residence_id,title,description,reported_on,lot_id,place_id,status,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+              'INSERT INTO issues(id,residence_id,title,description,reported_on,lot_id,place_id,status,priority,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
               issueId,
               me.residenceId,
               input.title,
@@ -456,10 +469,14 @@ const make = Effect.gen(function* () {
               lotId,
               placeId,
               input.status,
+              input.priority ?? 'normal',
               me.id,
               at,
             ),
-        change(me, at, 'issue', issueId, before, input),
+        change(me, at, 'issue', issueId, before, {
+          ...input,
+          priority: input.priority ?? before?.priority ?? 'normal',
+        }),
       ])
       .pipe(locationScope)
     return { id: issueId }
@@ -467,6 +484,7 @@ const make = Effect.gen(function* () {
 
   const works = Effect.fn('Technical.works')(function* (input: {
     readonly q?: string
+    readonly priority?: Priority
     readonly status?: WorkFilter
     readonly location?: string
     readonly supplier?: string
@@ -477,7 +495,7 @@ const make = Effect.gen(function* () {
       search = pattern(input.q),
       location = input.location ? parseLocation(input.location) : null,
       supplierId = input.supplier ?? ''
-    const filter = `w.residence_id=?
+    const filter = `w.residence_id=? AND (?='' OR w.priority=?)
       AND (?='all' OR (?='active' AND w.state IN ('open','in_progress')) OR ${statusOf}=?)
       AND (?='' OR EXISTS(SELECT 1 FROM work_locations x WHERE x.work_id=w.id AND (x.lot_id=? OR x.place_id=?)))
       AND (?='' OR EXISTS(SELECT 1 FROM work_suppliers ws WHERE ws.work_id=w.id AND ws.supplier_id=?))
@@ -488,6 +506,8 @@ const make = Effect.gen(function* () {
     const locationId = location?.id ?? ''
     const values = [
       me.residenceId,
+      input.priority ?? '',
+      input.priority ?? '',
       status,
       status,
       status,
@@ -504,11 +524,13 @@ const make = Effect.gen(function* () {
     const [rows, count, active] = yield* Effect.all([
       db.all<SummaryRow>(
         sql(
-          `SELECT w.id,w.title,${statusOf} AS status,w.planned_start,w.planned_end,w.actual_start,w.actual_end,
+          `SELECT w.id,w.title,w.priority,${statusOf} AS status,w.planned_start,w.planned_end,w.actual_start,w.actual_end,
           ${workLocations} AS locations,${workSuppliers} AS suppliers,
           (SELECT MIN(starts_at) FROM interventions i WHERE i.work_id=w.id AND i.status='planned' AND i.starts_at>=?) AS next_intervention
           FROM works w WHERE ${filter}
-          ORDER BY CASE w.state WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END,
+          ORDER BY w.state IN ('done','cancelled'),
+            CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+            CASE w.state WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END,
             CASE WHEN w.state IN ('done','cancelled') THEN COALESCE(w.actual_end,w.created_at) END DESC,
             COALESCE(w.planned_start,'9999-12-31'),w.created_at DESC,w.id LIMIT ? OFFSET ?`,
           yield* now,
@@ -533,13 +555,14 @@ const make = Effect.gen(function* () {
       title: string
       description: string
       state: WorkState
+      priority: Priority
       planned_start: string | null
       planned_end: string | null
       actual_start: string | null
       actual_end: string | null
     }>(
       sql(
-        'SELECT title,description,state,planned_start,planned_end,actual_start,actual_end FROM works WHERE id=? AND residence_id=?',
+        'SELECT title,description,state,priority,planned_start,planned_end,actual_start,actual_end FROM works WHERE id=? AND residence_id=?',
         id,
         me.residenceId,
       ),
@@ -608,6 +631,7 @@ const make = Effect.gen(function* () {
     const detail: WorkDetail = {
       id,
       title: row.title,
+      priority: row.priority,
       description: row.description,
       status: workStatus(row.state, row.planned_start),
       planned_start: row.planned_start,
@@ -634,16 +658,18 @@ const make = Effect.gen(function* () {
       supplierIds = yield* resolveSuppliers(me, input.supplier_ids)
     const issue = input.issue_id ? yield* findIssue(me, input.issue_id) : null
     if (issue && (issue.status !== 'open' || issue.work_id)) return yield* new IssueLinked()
+    const priority = input.priority ?? issue?.priority ?? 'normal'
     const workId = crypto.randomUUID(),
       at = yield* now
     yield* db
       .batch([
         sql(
-          'INSERT INTO works(id,residence_id,title,description,planned_start,planned_end,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)',
+          'INSERT INTO works(id,residence_id,title,description,priority,planned_start,planned_end,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
           workId,
           me.residenceId,
           input.title,
           input.description,
+          priority,
           input.planned_start,
           input.planned_end,
           me.id,
@@ -667,7 +693,7 @@ const make = Effect.gen(function* () {
               ),
             ]
           : []),
-        change(me, at, 'work', workId, null, input),
+        change(me, at, 'work', workId, null, { ...input, priority }),
       ])
       .pipe(locationScope)
     return { id: workId }
@@ -682,16 +708,17 @@ const make = Effect.gen(function* () {
     yield* db
       .batch([
         sql(
-          'UPDATE works SET title=?,description=?,planned_start=?,planned_end=? WHERE id=? AND residence_id=?',
+          'UPDATE works SET title=?,description=?,priority=?,planned_start=?,planned_end=? WHERE id=? AND residence_id=?',
           input.title,
           input.description,
+          input.priority ?? before.priority,
           input.planned_start,
           input.planned_end,
           id,
           me.residenceId,
         ),
         ...relations(me, id, locations, supplierIds),
-        change(me, yield* now, 'work', id, before, input),
+        change(me, yield* now, 'work', id, before, { ...input, priority: input.priority ?? before.priority }),
       ])
       .pipe(locationScope)
     return { ok: true }

@@ -1,3 +1,5 @@
+import { Visits } from '../services/Visits.ts'
+import { VisitsLive } from './VisitsHttp.ts'
 import { Effect, Layer } from 'effect'
 import { HttpRouter, HttpServer, HttpServerResponse } from 'effect/http'
 import { HttpApiBuilder } from 'effect/http-api'
@@ -57,6 +59,7 @@ export const createApiHandler = (db: DatabasePort, adminEmail = '', ai: AiProvid
     Stock.layer,
     Cleaning.layer,
     Technical.layer,
+    Visits.layer,
     Feedback.layer,
     Sync.layer,
   ).pipe(Layer.provide(sql))
@@ -81,6 +84,7 @@ export const createApiHandler = (db: DatabasePort, adminEmail = '', ai: AiProvid
       StockLive,
       CleaningLive,
       TechnicalLive,
+      VisitsLive,
       FeedbackLive,
       StudioLive,
       SyncLive,

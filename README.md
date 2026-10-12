@@ -1,6 +1,6 @@
 # GResidence
 
-Gestionnaire d’une résidence étudiante : comptes, lots, séjours, préavis, états des lieux, calendrier, bilan hebdomadaire, relevés des compteurs des communs et chiffre d’affaires des prestations. React, Astryx Neutral, Effect et Workers avec D1 local.
+Gestionnaire d’une résidence étudiante : comptes, lots, séjours, préavis, états des lieux, calendrier, bilan hebdomadaire, relevés des compteurs des communs, stocks, ménage, chiffre d’affaires des prestations et suivi technique. React, Astryx Neutral, Effect et Workers avec D1 local.
 
 ## Démarrer
 
@@ -25,6 +25,10 @@ Pour le rechargement du front, garder le backend actif et lancer `rtk npm run fr
 - Calendrier semaine/mois et liste quotidienne compacte, fuseau Europe/Paris.
 - Compteurs d’eau, d’électricité et de gaz des communs : suivi mensuel, index datés, historique paginé et corrections tracées.
 - Ménage : fiches modèles (tâches à faire, points à vérifier, fiche par défaut ou par lot), planning jour/semaine par agent, checklist cochée par l’agent, anomalies et réalisation.
+- Stocks : articles, catégories et vues, entrées, sorties et inventaires tracés, alertes de stock faible.
+- Prestations : sources configurables, chiffre d’affaires mensuel, récapitulatif annuel et copie Excel.
+- Technique : lieux, fournisseurs, signalements, travaux avec journal et interventions au calendrier.
+- Boîte à idées, barre d’actions ⌘K et synchronisation automatique des pages ouvertes.
 - Bilan lundi-dimanche des événements réalisés et préavis reçus actifs, aperçu et copie tabulée pour Excel. Sélection manuelle si le presse-papiers est indisponible.
 
 Le ménage consulte les lots et les mouvements sans noms, commentaires ni rapports, et ne voit que ses propres tâches de ménage. Les permissions sont contrôlées côté serveur. Les lots ayant un historique sont archivés ; les corrections et annulations sont tracées.
@@ -63,7 +67,7 @@ Build, types, lint, format, tests et bundle Worker sans déploiement. Les tests 
 
 ## Suite
 
-Import Excel, portail résident, documents signés, photos, technique, stocks et recettes restent hors V1. Aucun email automatique ni récupération de mot de passe en libre-service. Ces domaines conservent leurs pages de cadrage.
+Périmètre livré et questions ouvertes : voir `PRODUCT.md`. Restent hors périmètre : import Excel, portail résident, documents signés, photos, emails automatiques et récupération de mot de passe en libre-service. L’équipement par lot conserve sa page de cadrage.
 
 ## Références
 

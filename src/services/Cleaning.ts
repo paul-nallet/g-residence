@@ -1,3 +1,4 @@
+import type { Priority } from '../domain/priority.ts'
 import { Context, Effect, Layer } from 'effect'
 import {
   CleaningAgentInvalid,
@@ -26,7 +27,7 @@ import type { Me, Role } from '../domain/accounts.ts'
 import { onViolation, sql, Sql, type SqlError, type Statement } from './Database.ts'
 
 const taskColumns = `t.id,t.lot_id,l.number AS lot_number,COALESCE(b.name,'') AS building_name,t.agent_id,a.name AS agent_name,
-  t.day,t.status,t.template_name,t.note,t.report,t.completed_at,c.name AS completed_by,
+  t.day,t.status,t.priority,t.template_name,t.note,t.report,t.completed_at,c.name AS completed_by,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id) AS total,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state<>'todo') AS handled,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state='issue') AS issues,
@@ -211,7 +212,12 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  const tasks = Effect.fn('Cleaning.tasks')(function* (input: { from: string; to: string; agent?: string }) {
+  const tasks = Effect.fn('Cleaning.tasks')(function* (input: {
+    from: string
+    to: string
+    agent?: string
+    priority?: Priority
+  }) {
     const me = yield* CurrentUser
     if (input.to < input.from || Date.parse(input.to) - Date.parse(input.from) > MAX_PERIOD_DAYS * 86400000)
       return yield* new InvalidInput({ message: 'Période invalide : six semaines au maximum.' })
@@ -219,13 +225,16 @@ const make = Effect.gen(function* () {
     const agent = me.role === 'cleaner' ? '' : (input.agent ?? '')
     const rows = yield* db.all<TaskRow>(
       sql(
-        `SELECT ${taskColumns} WHERE t.residence_id=? AND t.day BETWEEN ? AND ? AND (?='' OR t.agent_id=?)${scope.clause}
-        ORDER BY t.day,t.status='cancelled',l.number COLLATE NOCASE,t.id`,
+        `SELECT ${taskColumns} WHERE t.residence_id=? AND t.day BETWEEN ? AND ? AND (?='' OR t.agent_id=?) AND (?='' OR t.priority=?)${scope.clause}
+        ORDER BY t.day,CASE t.status WHEN 'planned' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,
+          CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,l.number COLLATE NOCASE,t.id`,
         me.residenceId,
         input.from,
         input.to,
         agent,
         agent,
+        input.priority ?? '',
+        input.priority ?? '',
         ...scope.values,
       ),
     )
@@ -277,6 +286,7 @@ const make = Effect.gen(function* () {
     readonly lot_ids: readonly string[]
     readonly agent_id: string
     readonly day: string
+    readonly priority?: Priority
     readonly template_id: string
     readonly note: string
   }) {
@@ -299,8 +309,8 @@ const make = Effect.gen(function* () {
         const id = crypto.randomUUID()
         return [
           sql(
-            `INSERT INTO cleaning_tasks(id,residence_id,lot_id,agent_id,day,template_name,note,created_by,created_at)
-            VALUES(?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO cleaning_tasks(id,residence_id,lot_id,agent_id,day,template_name,note,priority,created_by,created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?)`,
             id,
             me.residenceId,
             lot,
@@ -308,6 +318,7 @@ const make = Effect.gen(function* () {
             input.day,
             template?.name ?? '',
             input.note,
+            input.priority ?? 'normal',
             me.id,
             createdAt,
           ),
@@ -320,16 +331,18 @@ const make = Effect.gen(function* () {
 
   const update = Effect.fn('Cleaning.update')(function* (
     id: string,
-    input: { agent_id: string; day: string; note: string },
+    input: { agent_id: string; day: string; note: string; priority?: Priority },
   ) {
     const me = yield* manager
-    yield* planned(yield* findTask(id))
+    const before = yield* findTask(id)
+    yield* planned(before)
     yield* write([
       sql(
-        'UPDATE cleaning_tasks SET agent_id=?,day=?,note=? WHERE id=? AND residence_id=?',
+        'UPDATE cleaning_tasks SET agent_id=?,day=?,note=?,priority=? WHERE id=? AND residence_id=?',
         input.agent_id,
         input.day,
         input.note,
+        input.priority ?? before.priority,
         id,
         me.residenceId,
       ),

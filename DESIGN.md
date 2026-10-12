@@ -22,6 +22,7 @@ Navigation initiale : Vue d'ensemble, Lots et mouvements, Calendrier, Ménage, T
 - Différencier prévu, réalisé, annulé, manquant et inconnu ; ne pas les coder seulement par une couleur.
 - Une checklist d'équipement distingue présence constatée, manquant et non vérifié.
 - Copie Excel : colonnes stables et contenu tabulé, libellé de période explicite, confirmation après copie réelle. Aucun transfert automatique vers Excel implicite.
+- Bilan hebdomadaire transversal : tableau paginé de l’activité des modules livrés, avec module, objet ou lieu et intervenant en plus des informations de résident. La copie Excel inclut toute la semaine, quelle que soit la page affichée. Expliquer la date de chaque activité et le mois des prestations ; aucun montant mensuel ne devient un chiffre d’affaires hebdomadaire.
 - Export de recettes : source, période, montant, devise et convention HT/TTC explicites.
 - Pas de faux chiffres, de rendez-vous inventés ou de boutons de saisie sans action.
 - Accessible au clavier, focus visible, icônes nommées, erreurs proches de la saisie, navigation mobile explicite.
@@ -50,3 +51,21 @@ Fiche de tâche : consigne, barre d’avancement, listes « À faire » et « À
 
 Validation : création de fiche, planification de deux lots, consultation par l’agent, cases cochées, anomalie avec constat, fin du ménage et lecture seule après réalisation, exercés dans le navigateur sur une base locale séparée, y compris à 375 px.
 
+
+## Travaux : tableau et liste
+
+La rubrique Travaux ouvre sur un tableau Kanban, avec une bascule Tableau / Liste conservée dans l’adresse. Les deux vues partagent la recherche et les filtres de statut, lieu et fournisseur. Les signalements, fournisseurs et lieux gardent leur présentation existante.
+
+Chaque statut forme une colonne avec son total et sa pagination côté API. Le filtre initial montre les chantiers à planifier, planifiés et en cours, avec une colonne Terminé pour y déposer un chantier ; Tous permet aussi de consulter les annulés. Sur écran étroit, les colonnes se placent les unes sous les autres. Les cartes présentent un titre renforcé, les lieux en sous-titre et le menu de déplacement en haut à droite. Les fournisseurs et dates sont affichés lorsqu’ils sont renseignés ; un chantier terminé montre sa date réelle de fin. La prochaine intervention est indiquée par un token compact, son absence par le texte secondaire « Intervention à prévoir ». Seul un retard de fin prévue reçoit une alerte colorée, sans bande pleine largeur. Chaque titre mène à la fiche du chantier. Les cartes se déplacent par glisser-déposer vers les statuts autorisés. Le dépôt ouvre une confirmation : date prévue pour planifier, date réelle pour démarrer ou terminer, confirmation pour annuler ou rouvrir. Le menu de la carte propose les mêmes déplacements au clavier et sur mobile. La colonne compatible survolée reçoit un fond neutre discret, sans bandeau ni déplacement du contenu ; annuler la confirmation ne modifie rien. Les actions de la fiche restent disponibles.
+
+## Priorité
+
+Un sélecteur Astryx propose Basse, Normale, Haute et Urgente dans les formulaires de signalement, de chantier et de tâche de ménage. Les filtres proposent aussi Toutes les priorités. Un Token avec libellé représente la priorité dans les cartes, listes, tableaux et fiches ; Haute utilise orange, Urgente rouge, les autres restent neutres. Le statut et le retard conservent leurs repères distincts. Les filtres se replient sur plusieurs lignes sur mobile ; les contrôles du planning sont alignés en bas avec la date, l’agent et la bascule Jour/Semaine.
+
+## Visites techniques
+
+Entrée autonome dans la sidenav, sans onglet de Technique ni rangée supplémentaire de liens. En-tête « Visites techniques », actions « Voir les échéances » et « Planifier une visite ». Une seule surface de données : historique des visites ou échéances, avec filtre bâtiment ; historique également filtrable par statut et recherche. Table paginée côté API, Token explicite pour les retards.
+
+Planification en dialogue guidé : bâtiment, titre, date, fréquence mensuelle par défaut ; puis points à contrôler, à partir d’une liste visuelle proposée et personnalisable. Aucun formulaire préalable de création de modèle. La prochaine visite peut reprendre les points de la précédente. Fréquence modifiable depuis les échéances.
+
+Fiche adressable #visits/<id>, fil d’Ariane du shell et points groupés par zone en List. Avancement et constats explicites, saisie en dialogue, observations obligatoires pour anomalies ou points non vérifiés. Terminer demande date réelle et compte rendu. Après clôture : lecture seule, création explicite d’un signalement par anomalie et copie Excel du compte rendu.

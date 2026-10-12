@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createApiHandler, SESSION_COOKIE } from '../src/server/Http.ts'
 import { database } from './helpers/database.ts'
+import type { Report } from '../src/domain/agenda.ts'
 
 const environment = async () => {
   const { port, sqlite } = database(),
@@ -292,6 +293,162 @@ test('bilan réalisé, corrections, annulation et limites de semaine', async () 
     await e.request('/inspections/' + iid, 'PATCH', { ...planned, status: 'cancelled' })
     const cancelled = (await (await e.request('/reports/weekly?date=2026-01-07')).json()) as { rows: unknown[] }
     assert.equal(cancelled.rows.length, 0)
+  } finally {
+    await e.dispose()
+  }
+})
+
+test('bilan de tous les modules, dates Paris, pagination et export complet', async () => {
+  const e = await environment()
+  try {
+    const { id: residence } = e.sqlite.prepare('SELECT id FROM residences').get() as { id: string }
+    const { id: actor } = e.sqlite.prepare('SELECT id FROM users').get() as { id: string }
+    const run = (query: string, ...values: (string | number | null)[]) => e.sqlite.prepare(query).run(...values)
+    run("INSERT INTO lots(id,residence_id,building_id,number) VALUES('report-lot',?,'test-building','101')", residence)
+    run(
+      "INSERT INTO cleaning_tasks(id,residence_id,lot_id,agent_id,day,created_by,created_at) VALUES('clean',?,'report-lot',?,'2026-03-20',?,'2026-03-20T09:00:00.000Z')",
+      residence,
+      actor,
+      actor,
+    )
+    run(
+      "INSERT INTO cleaning_task_items(id,residence_id,task_id,kind,label,position,state,note) VALUES('clean-item',?,'clean','check','Mur',0,'issue','Trace')",
+      residence,
+    )
+    run(
+      "UPDATE cleaning_tasks SET status='done',completed_at='2026-03-22T23:30:00.000Z',completed_by=?,report='Terminé' WHERE id='clean'",
+      actor,
+    )
+    run(
+      "INSERT INTO works(id,residence_id,title,created_by,created_at,state,actual_start,actual_end) VALUES('work',?,'Plomberie',?,'2026-03-20T09:00:00.000Z','done','2026-03-23','2026-03-24')",
+      residence,
+      actor,
+    )
+    run(
+      "INSERT INTO work_locations(id,residence_id,work_id,lot_id) VALUES('location',?,'work','report-lot')",
+      residence,
+    )
+    run(
+      "INSERT INTO work_notes(id,residence_id,work_id,kind,body,actor_id,created_at) VALUES('note',?,'work','problem','Fuite',?,'2026-03-25T12:00:00.000Z')",
+      residence,
+      actor,
+    )
+    run(
+      "INSERT INTO issues(id,residence_id,title,reported_on,created_by,created_at) VALUES('issue',?,'Robinet','2026-03-23',?,'2026-03-23T09:00:00.000Z')",
+      residence,
+      actor,
+    )
+    for (const [id, status] of [
+      ['done-intervention', 'done'],
+      ['planned-intervention', 'planned'],
+      ['cancelled-intervention', 'cancelled'],
+    ])
+      run(
+        "INSERT INTO interventions(id,residence_id,work_id,starts_at,duration,status,created_by,created_at) VALUES(?,?,'work','2026-03-24T09:00:00.000Z',30,?,?,'2026-03-20T09:00:00.000Z')",
+        id!,
+        residence,
+        status!,
+        actor,
+      )
+    run("INSERT INTO stock_items(id,residence_id,name,unit,threshold) VALUES('stock',?,'Linge','pièce',1)", residence)
+    run(
+      "INSERT INTO stock_movements(id,residence_id,item_id,kind,delta,quantity_after,occurred_on,comment,actor_id,created_at) VALUES('movement',?,'stock','in',3,3,'2026-03-26','Livraison',?,'2026-03-26T09:00:00.000Z')",
+      residence,
+      actor,
+    )
+    run(
+      "INSERT INTO meters(id,residence_id,name,location,reference,kind,unit) VALUES('meter',?,'Eau','Hall','','water','m3')",
+      residence,
+    )
+    run(
+      "INSERT INTO meter_readings(id,residence_id,meter_id,observed_on,value,actor_id) VALUES('reading',?,'meter','2026-03-27',123.5,?)",
+      residence,
+      actor,
+    )
+    run(
+      "INSERT INTO revenue_sources(id,residence_id,name,vat_mode,vat_rate) VALUES('source',?,'Café','ht',NULL)",
+      residence,
+    )
+    run(
+      "INSERT INTO revenue_entries(id,residence_id,source_id,period,amount_cents,vat_mode,net_cents,actor_id,updated_at) VALUES('entry',?,'source','2026-02',1000,'ht',1000,?,'2026-03-28T09:00:00.000Z')",
+      residence,
+      actor,
+    )
+    for (const [id, before, amount] of [
+      ['entry-first', null, 1000],
+      ['entry-correction', '{}', 2000],
+    ] as const)
+      run(
+        "INSERT INTO revenue_entry_changes(id,residence_id,entry_id,actor_id,before_json,after_json,created_at) VALUES(?,?,'entry',?,?,?,'2026-03-28T09:00:00.000Z')",
+        id,
+        residence,
+        actor,
+        before,
+        JSON.stringify({ period: '2026-02', amount_cents: amount, vat_mode: 'ht', comment: 'Correction' }),
+      )
+    for (let index = 0; index < 22; index++)
+      run(
+        "INSERT INTO feedback(id,residence_id,kind,message,author_id,created_at) VALUES(?,?,'idea',?,?, '2026-03-29T21:59:00.000Z')",
+        'feedback-' + index,
+        residence,
+        '=Idée\navec\ttabulation ' + index,
+        actor,
+      )
+    run(
+      "INSERT INTO feedback(id,residence_id,kind,message,author_id,created_at) VALUES('outside',?,'bug','Semaine suivante',?,'2026-03-29T22:00:00.000Z')",
+      residence,
+      actor,
+    )
+    run(
+      "INSERT INTO history(id,residence_id,lot_id,actor_id,action,after_json,created_at) VALUES('lot-history',?,'report-lot',?,'Lot créé','{}','2026-03-23T09:00:00.000Z')",
+      residence,
+      actor,
+    )
+    run("UPDATE users SET created_at='2026-03-23T09:00:00.000Z' WHERE id=?", actor)
+    const response = await e.request('/reports/weekly?date=2026-03-25&page=1')
+    assert.equal(response.status, 200, await response.clone().text())
+    const report = (await response.json()) as Report
+    const full = (await (await e.request('/reports/weekly?date=2026-03-25')).json()) as Report
+    assert.equal(report.total, 34)
+    assert.equal(report.rows.length, 20)
+    assert.deepEqual(
+      new Set(full.rows.map((row) => row.module)),
+      new Set(['Ménage', 'Technique', 'Stocks', 'Relevés', 'Prestations', 'Boîte à idées', 'Lots', 'Équipe']),
+    )
+    assert.equal(full.rows.find((row) => row.module === 'Ménage')?.date, '2026-03-23')
+    assert.match(full.rows.find((row) => row.module === 'Ménage')!.comment, /Mur : Trace/)
+    assert.equal(full.rows.filter((row) => row.kind === 'Intervention réalisée').length, 1)
+    assert.match(full.rows.find((row) => row.kind === 'Travaux terminés')!.subject, /Lot 101/)
+    assert.match(full.rows.find((row) => row.module === 'Relevés')!.comment, /123.5 m³/)
+    assert.match(full.rows.find((row) => row.kind === 'Chiffre d’affaires corrigé')!.comment, /2026-02 · 20.00 € HT/)
+    assert.equal(report.tsv, full.tsv)
+    assert.equal(report.tsv.split('\r\n').length, report.total + 1)
+    assert.match(report.tsv, /'=Idée avec tabulation/)
+    assert.doesNotMatch(report.tsv, /Semaine suivante/)
+    const second = (await (await e.request('/reports/weekly?date=2026-03-25&page=2')).json()) as Report
+    assert.equal(second.rows.length, 14)
+    assert.equal(second.tsv, report.tsv)
+    run("UPDATE cleaning_tasks SET status='planned',completed_at=NULL,completed_by=NULL WHERE id='clean'")
+    run("UPDATE meter_readings SET observed_on='2026-03-30' WHERE id='reading'")
+    const corrected = (await (await e.request('/reports/weekly?date=2026-03-25')).json()) as Report
+    assert.equal(corrected.total, 32)
+    e.sqlite.exec('PRAGMA ignore_check_constraints=ON')
+    run("INSERT INTO residences(id,name,singleton) VALUES('other-residence','Autre résidence',2)")
+    e.sqlite.exec('PRAGMA ignore_check_constraints=OFF')
+    run(
+      "INSERT INTO feedback(id,residence_id,kind,message,author_id,created_at) VALUES('other-feedback','other-residence','bug','Autre résidence',?,'2026-03-25T09:00:00.000Z')",
+      actor,
+    )
+    const isolated = (await (await e.request('/reports/weekly?date=2026-03-25')).json()) as Report
+    assert.equal(isolated.total, 32)
+    assert.doesNotMatch(isolated.tsv, /Autre résidence/)
+    run(
+      "INSERT INTO users(id,residence_id,email,name,role,password_hash,salt,created_at) SELECT 'backup-admin',residence_id,'backup@example.test','Autre admin','admin',password_hash,salt,'2026-01-01T00:00:00.000Z' FROM users WHERE id=?",
+      actor,
+    )
+    run("UPDATE users SET role='manager' WHERE id=?", actor)
+    const managerReport = (await (await e.request('/reports/weekly?date=2026-03-25')).json()) as Report
+    assert.ok(managerReport.rows.every((row) => row.module !== 'Équipe'))
   } finally {
     await e.dispose()
   }
@@ -1168,6 +1325,148 @@ test('ménage : fiches, planning, checklist, réalisation par l’agent et isola
     assert.equal((await e.request('/cleaning/templates/' + standardId, 'DELETE')).status, 200)
     const remaining = (await (await e.request('/cleaning/tasks/' + taskId)).json()) as { items: unknown[] }
     assert.equal(remaining.items.length, 2)
+  } finally {
+    await e.dispose()
+  }
+})
+
+test('priorités ménage : création multiple, filtre agent, correction, report et clôture', async () => {
+  const e = await environment()
+  try {
+    const invite = await e.request('/team/invitations', 'POST', { email: 'priorite@example.test', role: 'cleaner' })
+    const { token } = (await invite.json()) as { token: string }
+    const accept = await e.request(
+      '/auth/invitations/' + token,
+      'POST',
+      { name: 'Agent', password: 'Validation-seulement-2026' },
+      '',
+    )
+    const cleaner = accept.headers.get('set-cookie')!.split(';')[0]!
+    const { id: agent } = (await accept.json()) as { id: string }
+    const admin = (e.sqlite.prepare("SELECT id FROM users WHERE role='admin'").get() as { id: string }).id
+    const lots: string[] = []
+    for (let i = 0; i < 5; i++) {
+      const response = await e.request('/lots', 'POST', {
+        building_id: 'test-building',
+        number: String(i),
+        floor: '',
+        type: '',
+      })
+      assert.equal(response.status, 200, await response.clone().text())
+      lots.push((e.sqlite.prepare('SELECT id FROM lots WHERE number=?').get(String(i)) as { id: string }).id)
+    }
+    const input = { agent_id: agent, day: '2026-10-12', template_id: 'none', note: '' }
+    assert.equal(
+      (await e.request('/cleaning/tasks', 'POST', { ...input, lot_ids: lots.slice(0, 2), priority: 'urgent' })).status,
+      200,
+    )
+    for (const [index, priority] of ['high', 'normal', 'low'].entries()) {
+      assert.equal(
+        (
+          await e.request('/cleaning/tasks', 'POST', {
+            ...input,
+            lot_ids: [lots[index + 2]],
+            ...(priority === 'normal' ? {} : { priority }),
+          })
+        ).status,
+        200,
+      )
+    }
+    const url = '/cleaning/tasks?from=2026-10-12&to=2026-10-18'
+    const tasks = (await (await e.request(url)).json()) as { id: string; priority: string }[]
+    assert.deepEqual(
+      tasks.map((row) => row.priority),
+      ['urgent', 'urgent', 'high', 'normal', 'low'],
+    )
+    const task = tasks[0]!.id
+    assert.equal(
+      (
+        await e.request(
+          '/cleaning/tasks/' + task,
+          'PATCH',
+          { agent_id: agent, day: input.day, note: '', priority: 'low' },
+          cleaner,
+        )
+      ).status,
+      403,
+    )
+    assert.equal(
+      (
+        await e.request('/cleaning/tasks/' + task, 'PATCH', {
+          agent_id: agent,
+          day: input.day,
+          note: '',
+          priority: 'high',
+        })
+      ).status,
+      200,
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + task, 'PATCH', { agent_id: agent, day: input.day, note: 'Consigne' }))
+        .status,
+      200,
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/reschedule', 'POST', { task_ids: [task], day: '2026-10-13' })).status,
+      200,
+    )
+    const detail = (await (await e.request('/cleaning/tasks/' + task)).json()) as {
+      task: { priority: string; day: string }
+    }
+    assert.equal(detail.task.priority, 'high')
+    assert.equal(detail.task.day, '2026-10-13')
+    const urgent = (await (await e.request(url + '&priority=urgent')).json()) as { id: string; priority: string }[]
+    assert.equal(urgent.length, 1)
+    assert.equal(
+      (
+        await e.request('/cleaning/tasks', 'POST', {
+          ...input,
+          lot_ids: [lots[0]],
+          day: '2026-10-14',
+          agent_id: admin,
+          priority: 'urgent',
+        })
+      ).status,
+      200,
+    )
+    const own = (await (
+      await e.request(url + '&priority=urgent&agent=' + admin, 'GET', undefined, cleaner)
+    ).json()) as { id: string }[]
+    assert.deepEqual(
+      own.map((row) => row.id),
+      urgent.map((row) => row.id),
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + task + '/status', 'POST', { status: 'done', report: '' }, cleaner)).status,
+      200,
+    )
+    assert.equal(
+      (
+        await e.request('/cleaning/tasks/' + task, 'PATCH', {
+          agent_id: agent,
+          day: '2026-10-13',
+          note: '',
+          priority: 'urgent',
+        })
+      ).status,
+      409,
+    )
+    assert.throws(
+      () => e.sqlite.prepare('UPDATE cleaning_tasks SET priority=? WHERE id=?').run('urgent', task),
+      /cleaning_locked/,
+    )
+    assert.equal((await e.request(url + '&priority=impossible')).status, 400)
+    assert.equal(
+      (
+        await e.request('/cleaning/tasks', 'POST', {
+          ...input,
+          day: '2026-10-15',
+          lot_ids: [lots[0]],
+          priority: 'impossible',
+        })
+      ).status,
+      400,
+    )
   } finally {
     await e.dispose()
   }

@@ -454,3 +454,95 @@ test('technique : signalement, travaux, journal, interventions, calendrier et is
     await e.dispose()
   }
 })
+
+test('priorités techniques : héritage, correction, tri paginé, filtres et droits', async () => {
+  const e = await environment()
+  try {
+    const { id: place } = await e.json<{ id: string }>('/technical/places', 'POST', {
+      name: 'Hall',
+      building_id: 'b1',
+      description: '',
+      archived: false,
+    })
+    const issueInput = {
+      title: 'Fuite',
+      description: '',
+      reported_on: '2026-01-01',
+      location: 'place:' + place,
+      status: 'open',
+    }
+    const workInput = {
+      title: 'Réparation',
+      description: '',
+      locations: ['place:' + place],
+      supplier_ids: [],
+      planned_start: null,
+      planned_end: null,
+    }
+    const { id: issue } = await e.json<{ id: string }>('/technical/issues', 'POST', {
+      ...issueInput,
+      priority: 'urgent',
+    })
+    const { id: work } = await e.json<{ id: string }>('/technical/works', 'POST', { ...workInput, issue_id: issue })
+    assert.equal((await e.json<{ priority: string }>('/technical/works/' + work)).priority, 'urgent')
+    await e.json('/technical/works/' + work, 'PATCH', { ...workInput, planned_start: '2026-10-12' })
+    assert.equal((await e.json<{ priority: string }>('/technical/works/' + work)).priority, 'urgent')
+    await e.json('/technical/works/' + work, 'PATCH', { ...workInput, priority: 'low' })
+    assert.equal((await e.json<{ priority: string }>('/technical/works/' + work)).priority, 'low')
+    assert.equal((await e.json<{ items: { priority: string }[] }>('/technical/issues')).items[0]!.priority, 'urgent')
+    await e.json('/technical/issues/' + issue, 'PATCH', { ...issueInput, priority: 'high' })
+    await e.json('/technical/issues/' + issue, 'PATCH', issueInput)
+    const audit = e.sqlite
+      .prepare(
+        "SELECT before_json,after_json FROM technical_changes WHERE entity='work' AND entity_id=? ORDER BY rowid DESC LIMIT 1",
+      )
+      .get(work) as { before_json: string; after_json: string }
+    assert.equal(JSON.parse(audit.before_json).priority, 'urgent')
+    assert.equal(JSON.parse(audit.after_json).priority, 'low')
+    for (const priority of ['low', 'normal', 'high', 'urgent']) {
+      await e.json('/technical/works', 'POST', { ...workInput, title: priority, priority })
+      await e.json('/technical/issues', 'POST', { ...issueInput, title: priority, priority })
+    }
+    const works = await e.json<{ items: { priority: string }[]; total: number }>('/technical/works')
+    assert.deepEqual(
+      works.items.map((row) => row.priority),
+      ['urgent', 'high', 'normal', 'low', 'low'],
+    )
+    const filtered = await e.json<{ items: { priority: string }[]; total: number }>(
+      '/technical/works?priority=urgent&status=to_plan',
+    )
+    assert.equal(filtered.total, 1)
+    assert.equal(filtered.items[0]!.priority, 'urgent')
+    const issues = await e.json<{ items: { priority: string }[]; total: number }>(
+      '/technical/issues?priority=high&status=open',
+    )
+    assert.equal(issues.total, 2)
+    assert.ok(issues.items.every((row) => row.priority === 'high'))
+    for (let i = 0; i < 21; i++)
+      await e.json('/technical/works', 'POST', { ...workInput, title: 'Urgence ' + i, priority: 'urgent' })
+    const first = await e.json<{ items: { id: string; priority: string }[]; total: number }>(
+      '/technical/works?priority=urgent&page=1',
+    )
+    const second = await e.json<{ items: { id: string; priority: string }[]; total: number }>(
+      '/technical/works?priority=urgent&page=2',
+    )
+    assert.equal(first.total, 22)
+    assert.equal(first.items.length, 20)
+    assert.equal(second.items.length, 2)
+    assert.equal(new Set([...first.items, ...second.items].map((row) => row.id)).size, 22)
+    assert.equal(await e.status('/technical/works', 'POST', { ...workInput, priority: 'impossible' }), 400)
+    assert.equal(await e.status('/technical/issues?priority=impossible'), 400)
+    const cleaner = await e.cleaner()
+    assert.equal(await e.status('/technical/works?priority=urgent', 'GET', undefined, cleaner), 403)
+    assert.equal(
+      await e.status('/technical/issues/' + issue, 'PATCH', { ...issueInput, priority: 'urgent' }, cleaner),
+      403,
+    )
+    assert.throws(
+      () => e.sqlite.prepare('UPDATE works SET priority=? WHERE id=?').run('impossible', work),
+      /CHECK constraint/,
+    )
+  } finally {
+    await e.dispose()
+  }
+})

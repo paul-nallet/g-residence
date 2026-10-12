@@ -1,0 +1,14 @@
+CREATE INDEX cleaning_tasks_completed ON cleaning_tasks(residence_id,completed_at) WHERE status='done';
+CREATE INDEX stock_movements_occurred ON stock_movements(residence_id,occurred_on);
+CREATE INDEX meter_readings_observed ON meter_readings(residence_id,observed_on);
+CREATE INDEX work_notes_created ON work_notes(residence_id,created_at);
+CREATE INDEX works_actual_start ON works(residence_id,actual_start);
+CREATE INDEX works_actual_end ON works(residence_id,actual_end);
+CREATE INDEX revenue_entry_changes_created ON revenue_entry_changes(residence_id,created_at);
+CREATE INDEX history_created ON history(residence_id,created_at);
+CREATE INDEX users_created ON users(residence_id,created_at);
+CREATE INDEX stays_actual_start ON stays(residence_id,actual_start);
+CREATE INDEX stays_actual_end ON stays(residence_id,actual_end);
+CREATE INDEX notices_received ON notices(residence_id,received_on);
+CREATE INDEX inspections_completed ON inspections(residence_id,completed_on) WHERE status='done';
+CREATE INDEX issues_reported ON issues(residence_id,reported_on);

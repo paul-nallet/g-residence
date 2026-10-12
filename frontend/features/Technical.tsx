@@ -1,16 +1,22 @@
+import type { Priority } from '../../src/domain/priority.ts'
+import { PriorityField, PriorityFilter, PriorityToken, type PriorityFilterValue } from './priority.tsx'
 import { useCallback, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { Grid } from '@astryxdesign/core/Grid'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { DateTimeInput, type ISODateTimeString } from '@astryxdesign/core/DateTimeInput'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Link } from '@astryxdesign/core/Link'
+import { Layout, LayoutContent } from '@astryxdesign/core/Layout'
 import { List, ListItem } from '@astryxdesign/core/List'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { MultiSelector } from '@astryxdesign/core/MultiSelector'
 import { NumberInput } from '@astryxdesign/core/NumberInput'
 import { Selector } from '@astryxdesign/core/Selector'
-import { HStack, VStack } from '@astryxdesign/core/Stack'
+import { Section } from '@astryxdesign/core/Section'
+import { HStack, StackItem, VStack } from '@astryxdesign/core/Stack'
 import { Tab, TabList } from '@astryxdesign/core/TabList'
 import { Table, proportional, useTablePagination } from '@astryxdesign/core/Table'
 import { Text } from '@astryxdesign/core/Text'
@@ -39,6 +45,7 @@ import { PageLayout } from '../app/PageLayout.tsx'
 import { call } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { useHashParam } from '../lib/hashParams.ts'
+import { Journal } from './journal.tsx'
 import { DateField, dateLabel, Editor, Feedback, Loading, StateToken } from './shared.tsx'
 
 type Tab = 'works' | 'issues' | 'suppliers' | 'places'
@@ -166,6 +173,7 @@ function WorkEditor({
 }) {
   const [title, setTitle] = useState(work?.title ?? issue?.title ?? ''),
     [description, setDescription] = useState(work?.description ?? issue?.description ?? ''),
+    [priority, setPriority] = useState<Priority>(work?.priority ?? issue?.priority ?? 'normal'),
     [locations, setLocations] = useState<string[]>(
       work ? work.locations.map((location) => location.ref) : issue?.location ? [issue.location.ref] : [],
     ),
@@ -184,6 +192,7 @@ function WorkEditor({
     description,
     locations,
     supplier_ids: suppliers,
+    priority,
     planned_start: start || null,
     planned_end: end || null,
   }
@@ -223,6 +232,7 @@ function WorkEditor({
           placeholder="Remplacer le siphon, reprendre la peinture du hall…"
         />
         <TextArea label="Description" value={description} onChange={setDescription} isOptional maxLength={4000} />
+        <PriorityField value={priority} onChange={setPriority} />
         <MultiSelector
           label="Lieux concernés"
           description="Les lots actifs sont des lieux ; ajoutez une partie commune si elle manque."
@@ -500,6 +510,7 @@ export function TechnicalWork({ id }: { id: string }) {
             <HStack gap={2} wrap="wrap" vAlign="center">
               <Heading level={1}>{work.title}</Heading>
               <WorkToken status={work.status} />
+              <PriorityToken priority={work.priority} />
             </HStack>
             <Text color="secondary">{work.locations.map((location) => location.label).join(' · ')}</Text>
           </VStack>
@@ -642,24 +653,13 @@ export function TechnicalWork({ id }: { id: string }) {
           <Text>Aucune intervention. Planifiez un rendez-vous technique pour qu’il apparaisse au calendrier.</Text>
         )}
       </VStack>
-      <List
-        hasDividers
-        header={
-          <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center">
-            <Heading level={2}>Journal</Heading>
-            <Button label="Ajouter au journal" onClick={() => setDialog({ kind: 'note' })} />
-          </HStack>
-        }
-      >
-        {work.notes.map((note) => (
-          <ListItem
-            key={note.id}
-            label={note.body}
-            description={instantLabel(note.created_at) + ' · ' + note.actor}
-            endContent={<Token label={noteLabels[note.kind]} color={noteColors[note.kind]} size="sm" />}
-          />
-        ))}
-      </List>
+      <Journal
+        entries={work.notes.map((note) => ({
+          ...note,
+          tag: { label: noteLabels[note.kind], color: noteColors[note.kind] },
+        }))}
+        action={<Button label="Ajouter au journal" onClick={() => setDialog({ kind: 'note' })} />}
+      />
       {dialog?.kind === 'edit' && options.data && (
         <WorkEditor
           options={options.data}
@@ -695,7 +695,7 @@ function WorksTable({
   query,
   version = 0,
 }: {
-  query: { q?: string; status?: WorkFilter; location?: string; supplier?: string }
+  query: { q?: string; status?: WorkFilter; location?: string; supplier?: string; priority?: Priority }
   version?: number
 }) {
   const [page, setPage] = useState(1)
@@ -744,6 +744,12 @@ function WorksTable({
             ),
           },
           {
+            key: 'priority',
+            header: 'Priorité',
+            width: proportional(1),
+            renderCell: (row) => <PriorityToken priority={row.priority} />,
+          },
+          {
             key: 'status',
             header: 'Statut',
             width: proportional(1),
@@ -779,21 +785,290 @@ function WorksTable({
   )
 }
 
+const workDestinations = (work: WorkSummary): WorkStatus[] => {
+  if (work.status === 'done' || work.status === 'cancelled')
+    return [work.actual_start ? 'in_progress' : work.planned_start ? 'planned' : 'to_plan']
+  return work.status === 'in_progress'
+    ? ['done', 'cancelled']
+    : [work.status === 'planned' ? 'to_plan' : 'planned', 'in_progress', 'done', 'cancelled']
+}
+
+function WorkMoveEditor({
+  id,
+  target,
+  close,
+  saved,
+}: {
+  id: string
+  target: WorkStatus
+  close: () => void
+  saved: () => void
+}) {
+  const load = useCallback(() => call((client) => client.technical.work({ params: { id } })), [id])
+  const result = useQuery('technical-work:' + id, load)
+  const [date, setDate] = useState(today())
+  const mutation = useMutation()
+  if (!result.data)
+    return (
+      <Editor title="Déplacer le chantier" close={close} busy={false} error="" disabled submit={() => undefined}>
+        <Loading error={result.error} retry={() => void result.refresh()} />
+      </Editor>
+    )
+  const work = result.data
+  if (!workDestinations({ ...work, locations: [], suppliers: [], next_intervention: null }).includes(target))
+    return (
+      <Editor title="Déplacement indisponible" close={close} busy={false} error="" disabled submit={() => undefined}>
+        <Text>Le statut de ce chantier a changé. Fermez cette fenêtre et actualisez le tableau.</Text>
+      </Editor>
+    )
+  const closed = work.status === 'done' || work.status === 'cancelled'
+  if (closed || target === 'in_progress' || target === 'done' || target === 'cancelled')
+    return (
+      <ActionEditor
+        work={work}
+        action={closed ? 'reopen' : target === 'in_progress' ? 'start' : target === 'done' ? 'finish' : 'cancel'}
+        close={close}
+        saved={saved}
+      />
+    )
+  return (
+    <Editor
+      title={'Déplacer vers « ' + workStatusLabels[target] + ' »'}
+      label="Confirmer le déplacement"
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error}
+      disabled={target === 'planned' && !date}
+      submit={() =>
+        void mutation.run(
+          () =>
+            call((client) =>
+              client.technical.updateWork({
+                params: { id },
+                payload: {
+                  title: work.title,
+                  priority: work.priority,
+                  description: work.description,
+                  locations: work.locations.map((location) => location.ref),
+                  supplier_ids: work.suppliers.map((supplier) => supplier.id),
+                  planned_start: target === 'planned' ? date : null,
+                  planned_end: work.planned_end,
+                },
+              }),
+            ),
+          saved,
+        )
+      }
+    >
+      <Text>{work.title}</Text>
+      {target === 'planned' ? (
+        <DateField label="Début prévu" value={date} onChange={setDate} />
+      ) : (
+        <Text>La date de début prévue sera retirée. La date de fin prévue est conservée.</Text>
+      )}
+    </Editor>
+  )
+}
+
+function WorksColumn({
+  query,
+  status,
+  version,
+  dragged,
+  onDrag,
+  onDropAction,
+  busy,
+}: {
+  dragged: WorkSummary | null
+  onDrag: (work: WorkSummary | null) => void
+  onDropAction: (id: string, target: WorkStatus) => void
+  busy: boolean
+  query: { q?: string; location?: string; supplier?: string; priority?: Priority }
+  status: WorkStatus
+  version: number
+}) {
+  const [page, setPage] = useState(1)
+  const key = JSON.stringify(query)
+  const load = useCallback(
+    () => call((client) => client.technical.works({ query: { ...JSON.parse(key), status, page } })),
+    [key, status, page],
+  )
+  const result = useQuery(`technical-works:${key}:${status}:${page}:${version}`, load)
+  const closed = status === 'done' || status === 'cancelled'
+  const accepts = !busy && dragged !== null && workDestinations(dragged).includes(status)
+  const [over, setOver] = useState(false)
+  return (
+    <Section
+      padding={3}
+      variant={accepts && over ? 'muted' : 'transparent'}
+      onDragOver={(event) => {
+        if (!accepts) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setOver(true)
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        setOver(false)
+        if (accepts && dragged) onDropAction(dragged.id, status)
+        onDrag(null)
+      }}
+    >
+      <VStack gap={3}>
+        <HStack gap={2} vAlign="center">
+          <Heading level={2}>{workStatusLabels[status]}</Heading>
+          {result.data && <Badge label={result.data.total} />}
+        </HStack>
+        {!result.data ? (
+          <Loading error={result.error} retry={() => void result.refresh()} />
+        ) : (
+          <>
+            {result.data.items.length ? (
+              result.data.items.map((work) => (
+                <Card
+                  key={work.id}
+                  padding={3}
+                  draggable={!busy}
+                  elevation={dragged?.id === work.id ? 'med' : 'none'}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', work.id)
+                    onDrag(work)
+                  }}
+                  onDragEnd={() => {
+                    onDrag(null)
+                    setOver(false)
+                  }}
+                >
+                  <VStack gap={3}>
+                    <HStack gap={2} vAlign="start">
+                      <StackItem size="fill">
+                        <VStack gap={1}>
+                          <Link
+                            href={'#technical/travaux/' + work.id}
+                            draggable={false}
+                            isStandalone
+                            color="primary"
+                            weight="semibold"
+                            maxLines={2}
+                          >
+                            {work.title}
+                          </Link>
+                          <Text type="supporting" maxLines={2}>
+                            {work.locations.join(' · ')}
+                          </Text>
+                        </VStack>
+                      </StackItem>
+                      <MoreMenu
+                        label={'Déplacer le chantier ' + work.title}
+                        size="sm"
+                        alignment="end"
+                        presentation="adaptive"
+                        isDisabled={busy}
+                        items={workDestinations(work).map((target) => ({
+                          label: 'Déplacer vers « ' + workStatusLabels[target] + ' »',
+                          onClick: () => onDropAction(work.id, target),
+                        }))}
+                      />
+                    </HStack>
+                    <HStack gap={2} wrap="wrap">
+                      <PriorityToken priority={work.priority} />
+                    </HStack>
+                    {(work.suppliers.length > 0 || work.planned_start || work.planned_end || work.actual_end) && (
+                      <VStack gap={1}>
+                        {work.suppliers.length > 0 && (
+                          <Text type="supporting" maxLines={1}>
+                            {work.suppliers.join(' · ')}
+                          </Text>
+                        )}
+                        {work.status === 'done' && work.actual_end ? (
+                          <Text type="supporting">Terminé le {dateLabel(work.actual_end)}</Text>
+                        ) : work.planned_start && work.planned_end ? (
+                          <Text type="supporting">{periodLabel(work.planned_start, work.planned_end)}</Text>
+                        ) : work.planned_start ? (
+                          <Text type="supporting">Début prévu · {dateLabel(work.planned_start)}</Text>
+                        ) : work.planned_end ? (
+                          <Text type="supporting">Fin prévue · {dateLabel(work.planned_end)}</Text>
+                        ) : null}
+                      </VStack>
+                    )}
+                    {work.next_intervention ? (
+                      <HStack gap={2} wrap="wrap">
+                        <Token label={'Intervention · ' + instantLabel(work.next_intervention)} size="sm" />
+                      </HStack>
+                    ) : !closed ? (
+                      <Text type="supporting" color="secondary">
+                        Intervention à prévoir
+                      </Text>
+                    ) : null}
+                    {!closed && work.planned_end && work.planned_end < today() && (
+                      <HStack gap={2} wrap="wrap">
+                        <Token label="Fin prévue dépassée" color="red" size="sm" />
+                      </HStack>
+                    )}
+                  </VStack>
+                </Card>
+              ))
+            ) : (
+              <Text color="secondary">Aucun chantier.</Text>
+            )}
+            {result.data.total > PAGE_SIZE && (
+              <HStack gap={2} wrap="wrap" vAlign="center">
+                <Button
+                  label="Précédent"
+                  aria-label={'Page précédente · ' + workStatusLabels[status]}
+                  size="sm"
+                  isDisabled={page === 1}
+                  onClick={() => setPage(page - 1)}
+                />
+                <Text type="supporting">
+                  {page} / {Math.ceil(result.data.total / PAGE_SIZE)}
+                </Text>
+                <Button
+                  label="Suivant"
+                  aria-label={'Page suivante · ' + workStatusLabels[status]}
+                  size="sm"
+                  isDisabled={page * PAGE_SIZE >= result.data.total}
+                  onClick={() => setPage(page + 1)}
+                />
+              </HStack>
+            )}
+          </>
+        )}
+      </VStack>
+    </Section>
+  )
+}
+
 const workFilterLabels: Record<WorkFilter, string> = { active: 'En cours et à venir', all: 'Tous', ...workStatusLabels }
 
 export function TechnicalWorks() {
   const [q, setQ] = useState(''),
     [status, setStatus] = useState<WorkFilter>('active'),
+    [priority, setPriority] = useState<PriorityFilterValue>('all'),
+    [view, setView] = useHashParam('vue', 'tableau'),
     [location, setLocation] = useHashParam('lieu', ''),
     [supplier, setSupplier] = useHashParam('fournisseur', ''),
     [creating, setCreating] = useState(false),
-    [version, setVersion] = useState(0)
+    [version, setVersion] = useState(0),
+    [dragged, setDragged] = useState<WorkSummary | null>(null),
+    [move, setMove] = useState<{ id: string; target: WorkStatus } | null>(null),
+    [success, setSuccess] = useState('')
   const options = useQuery('technical-options', loadOptions)
+  const onDropAction = useCallback((id: string, target: WorkStatus) => {
+    setDragged(null)
+    setSuccess('')
+    setMove({ id, target })
+  }, [])
   const query = {
     ...(q.trim() ? { q } : {}),
     status,
     ...(location ? { location } : {}),
     ...(supplier ? { supplier } : {}),
+    ...(priority !== 'all' ? { priority } : {}),
   }
   return (
     <TechnicalPage
@@ -809,6 +1084,7 @@ export function TechnicalWorks() {
     >
       <HStack gap={3} wrap="wrap" vAlign="end">
         <TextInput label="Rechercher" value={q} onChange={setQ} hasClear placeholder="Titre, lieu, fournisseur" />
+        <PriorityFilter value={priority} onChange={setPriority} />
         <Selector
           label="Statut"
           value={status}
@@ -834,7 +1110,50 @@ export function TechnicalWorks() {
           options={(options.data?.suppliers ?? []).map((item) => ({ value: item.id, label: item.name }))}
         />
       </HStack>
-      <WorksTable query={query} version={version} />
+      <Feedback success={success} />
+      <TabList value={view === 'liste' ? 'liste' : 'tableau'} onChange={setView}>
+        <Tab value="tableau" label="Tableau" />
+        <Tab value="liste" label="Liste" />
+      </TabList>
+      {view === 'liste' ? (
+        <WorksTable key={JSON.stringify(query)} query={query} version={version} />
+      ) : (
+        <Layout height="auto" padding={0}>
+          <LayoutContent>
+            <Grid columns={{ minWidth: 280, max: 5 }} gap={4} align="stretch">
+              {(['to_plan', 'planned', 'in_progress', 'done', 'cancelled'] as const)
+                .filter(
+                  (column) => status === 'all' || (status === 'active' ? column !== 'cancelled' : column === status),
+                )
+                .map((column) => (
+                  <WorksColumn
+                    key={JSON.stringify(query) + column}
+                    query={query}
+                    status={column}
+                    version={version}
+                    dragged={dragged}
+                    onDrag={setDragged}
+                    busy={move !== null}
+                    onDropAction={onDropAction}
+                  />
+                ))}
+            </Grid>
+          </LayoutContent>
+        </Layout>
+      )}
+      {move && (
+        <WorkMoveEditor
+          key={move.id + move.target}
+          id={move.id}
+          target={move.target}
+          close={() => setMove(null)}
+          saved={() => {
+            setMove(null)
+            setVersion((value) => value + 1)
+            setSuccess('Chantier déplacé.')
+          }}
+        />
+      )}
       {creating && options.data && (
         <WorkEditor
           options={options.data}
@@ -863,13 +1182,14 @@ function IssueEditor({
 }) {
   const [title, setTitle] = useState(issue?.title ?? ''),
     [description, setDescription] = useState(issue?.description ?? ''),
+    [priority, setPriority] = useState<Priority>(issue?.priority ?? 'normal'),
     [reported, setReported] = useState(issue?.reported_on ?? today()),
     [location, setLocation] = useState(issue?.location?.ref ?? ''),
     [status, setStatus] = useState(issue?.status ?? 'open'),
     [created, setCreated] = useState(noneCreated),
     [nested, setNested] = useState(false)
   const mutation = useMutation()
-  const payload = { title, description, reported_on: reported, location, status }
+  const payload = { title, description, reported_on: reported, location, status, priority }
   return (
     <>
       <Editor
@@ -899,6 +1219,7 @@ function IssueEditor({
           placeholder="Capot manquant, trace au mur, fuite…"
         />
         <TextArea label="Description" value={description} onChange={setDescription} isOptional maxLength={2000} />
+        <PriorityField value={priority} onChange={setPriority} />
         <DateField label="Constaté le" value={reported} onChange={setReported} past />
         <Selector
           label="Lieu"
@@ -940,15 +1261,21 @@ function IssueEditor({
 export function TechnicalIssues() {
   const [q, setQ] = useState(''),
     [status, setStatus] = useState<'all' | IssueStatus>('open'),
+    [priority, setPriority] = useState<PriorityFilterValue>('all'),
     [page, setPage] = useState(1),
     [dialog, setDialog] = useState<{ kind: 'issue'; issue?: Issue } | { kind: 'work'; issue: Issue } | null>(null),
     [success, setSuccess] = useState('')
   const options = useQuery('technical-options', loadOptions)
   const load = useCallback(
-    () => call((client) => client.technical.issues({ query: { ...(q.trim() ? { q } : {}), status, page } })),
-    [q, status, page],
+    () =>
+      call((client) =>
+        client.technical.issues({
+          query: { ...(q.trim() ? { q } : {}), ...(priority !== 'all' ? { priority } : {}), status, page },
+        }),
+      ),
+    [q, status, priority, page],
   )
-  const result = useQuery(`technical-issues:${q}:${status}:${page}`, load)
+  const result = useQuery(`technical-issues:${q}:${status}:${priority}:${page}`, load)
   const pagination = useTablePagination<Issue>({
     page,
     onPageChange: setPage,
@@ -980,6 +1307,13 @@ export function TechnicalIssues() {
           }}
           hasClear
           placeholder="Titre, description, lieu"
+        />
+        <PriorityFilter
+          value={priority}
+          onChange={(value) => {
+            setPriority(value)
+            setPage(1)
+          }}
         />
         <Selector
           label="État"
@@ -1051,6 +1385,12 @@ export function TechnicalIssues() {
                     <Text type="supporting">{row.actor}</Text>
                   </VStack>
                 ),
+              },
+              {
+                key: 'priority',
+                header: 'Priorité',
+                width: proportional(1),
+                renderCell: (row) => <PriorityToken priority={row.priority} />,
               },
               {
                 key: 'status',

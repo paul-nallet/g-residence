@@ -107,6 +107,6 @@ export const ReportsLive = HttpApiBuilder.group(
   'reports',
   Effect.fn(function* (handlers) {
     const agenda = yield* Agenda
-    return handlers.handle('weekly', ({ query }) => agendaHttp(agenda.report(query.date)))
+    return handlers.handle('weekly', ({ query }) => agendaHttp(agenda.report(query.date, query.page)))
   }),
 )

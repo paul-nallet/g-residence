@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import type { InvalidInput } from './errors.ts'
 import { CivilDate, OptionalText, RequiredText } from './shared.ts'
+import { Priority } from './priority.ts'
 import { Role } from './accounts.ts'
 
 export const CleaningItemKind = Schema.Literals(['task', 'check'])
@@ -42,6 +43,7 @@ export const CleaningOptions = Schema.Struct({
 export type CleaningOptions = typeof CleaningOptions.Type
 const lotCountMessage = 'Choisissez entre 1 et 100 lots.'
 export const CleaningTaskCreate = Schema.Struct({
+  priority: Schema.optionalKey(Priority),
   lot_ids: Schema.Array(Schema.String).check(
     Schema.isMinLength(1, { message: lotCountMessage }),
     Schema.isMaxLength(100, { message: lotCountMessage }),
@@ -59,9 +61,15 @@ export const CleaningReschedule = Schema.Struct({
   ),
   day: CivilDate,
 })
-export const CleaningTaskInput = Schema.Struct({ agent_id: Schema.String, day: CivilDate, note: OptionalText(1000) })
+export const CleaningTaskInput = Schema.Struct({
+  agent_id: Schema.String,
+  day: CivilDate,
+  note: OptionalText(1000),
+  priority: Schema.optionalKey(Priority),
+})
 export const CleaningStatusInput = Schema.Struct({ status: CleaningStatus, report: OptionalText(1000) })
 export const CleaningTask = Schema.Struct({
+  priority: Priority,
   id: Schema.String,
   lot_id: Schema.String,
   lot_number: Schema.String,

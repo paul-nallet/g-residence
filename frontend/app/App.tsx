@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { Breadcrumbs, BreadcrumbItem } from '@astryxdesign/core/Breadcrumbs'
 import { Button } from '@astryxdesign/core/Button'
@@ -10,28 +10,40 @@ import { SideNav, SideNavCollapseButton, SideNavHeading, SideNavItem, SideNavSec
 import { Text } from '@astryxdesign/core/Text'
 import { TopNav } from '@astryxdesign/core/TopNav'
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen, Sparkles, UserRound } from 'lucide-react'
-import { Auth } from '../features/Auth.tsx'
-import { Calendar } from '../features/Calendar.tsx'
-import { Cleaning, CleaningTaskDetail, CleaningTemplateDetail, CleaningTemplates } from '../features/Cleaning.tsx'
-import { Ideas } from '../features/Ideas.tsx'
-import { LotDetail } from '../features/LotDetail.tsx'
-import { Lots } from '../features/Lots.tsx'
-import { MeterDetail, Meters } from '../features/Meters.tsx'
-import { Revenue, RevenueSourceDetail, RevenueYear } from '../features/Revenue.tsx'
-import { Stock, StockDetail } from '../features/Stock.tsx'
-import { Overview } from '../features/Overview.tsx'
-import { Reports } from '../features/Reports.tsx'
 import {
+  Auth,
+  Calendar,
+  Cleaning,
+  CleaningTaskDetail,
+  CleaningTemplateDetail,
+  CleaningTemplates,
+  Ideas,
+  LotDetail,
+  Lots,
+  MeterDetail,
+  Meters,
+  Overview,
+  PageLoading,
+  Reports,
+  Revenue,
+  RevenueSourceDetail,
+  RevenueYear,
+  Stock,
+  StockDetail,
+  Studio,
+  Team,
+  VisitTemplates,
+  VisitTemplateEditor,
+  TechnicalVisits,
+  TechnicalVisit,
   TechnicalIssues,
   TechnicalPlaces,
   TechnicalSupplier,
   TechnicalSuppliers,
   TechnicalWork,
   TechnicalWorks,
-} from '../features/Technical.tsx'
-import { Studio } from '../features/Studio.tsx'
-import { Team } from '../features/Team.tsx'
-import { Feedback, Loading, roleLabels } from '../features/shared.tsx'
+} from './pages.tsx'
+import { Feedback, Loading, roleLabels } from '../features/status.tsx'
 import { call, SESSION_EXPIRED } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { CommandBar } from '../command/CommandBar.tsx'
@@ -77,7 +89,14 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
   }
   if (!auth.data.me || invite)
     return (
-      <Auth setup={auth.data.setupRequired} allowed={auth.data.setupAllowed} invite={invite} onConnected={connected} />
+      <Suspense fallback={<PageLoading />}>
+        <Auth
+          setup={auth.data.setupRequired}
+          allowed={auth.data.setupAllowed}
+          invite={invite}
+          onConnected={connected}
+        />
+      </Suspense>
     )
   const me = auth.data.me,
     [path = '', query = ''] = route.split('?'),
@@ -137,6 +156,18 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
       <RevenueSourceDetail key={id} id={id} />
     ) : (
       <Revenue />
+    )
+  ) : section.id === 'visits' ? (
+    id === 'templates' ? (
+      sub ? (
+        <VisitTemplateEditor key={sub} id={sub === 'new' ? undefined : sub} />
+      ) : (
+        <VisitTemplates />
+      )
+    ) : id ? (
+      <TechnicalVisit key={id} id={id} />
+    ) : (
+      <TechnicalVisits />
     )
   ) : section.id === 'technical' ? (
     id === 'travaux' && sub ? (
@@ -283,11 +314,13 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
             />
           </LayoutHeader>
         }
-        content={content}
+        content={<Suspense fallback={<PageLoading />}>{content}</Suspense>}
         end={
           isStudioOpen ? (
             <LayoutPanel hasDivider width={400} padding={0} isScrollable={false} role="complementary" label="AI Studio">
-              <Studio route={route} onClose={() => setIsStudioOpen(false)} />
+              <Suspense fallback={<PageLoading />}>
+                <Studio route={route} onClose={() => setIsStudioOpen(false)} />
+              </Suspense>
             </LayoutPanel>
           ) : undefined
         }

@@ -1,11 +1,28 @@
 import { call } from './api.ts'
 
-const INTERVAL = 10_000
+const ACTIVE_INTERVAL = 10_000
+const IDLE_INTERVAL = 60_000
+const IDLE_AFTER = 5 * 60_000
+const activityEvents = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
 const listeners = new Set<() => void>()
 let version: number | null = null
-let timer: ReturnType<typeof setInterval> | undefined
+let timer: ReturnType<typeof setTimeout> | undefined
+let lastActivity = Date.now()
 let checking = false
 let recheck = false
+
+const isIdle = () => Date.now() - lastActivity > IDLE_AFTER
+
+const schedule = () => {
+  clearTimeout(timer)
+  timer = setTimeout(
+    () => {
+      void checkForChanges()
+      schedule()
+    },
+    isIdle() ? IDLE_INTERVAL : ACTIVE_INTERVAL,
+  )
+}
 
 export const checkForChanges = async (): Promise<void> => {
   if (listeners.size === 0 || (version !== null && document.visibilityState === 'hidden')) return
@@ -31,21 +48,35 @@ export const checkForChanges = async (): Promise<void> => {
 }
 
 const onVisible = () => {
-  if (document.visibilityState === 'visible') void checkForChanges()
+  if (document.visibilityState !== 'visible') return
+  lastActivity = Date.now()
+  void checkForChanges()
+  schedule()
+}
+
+const onActivity = () => {
+  const wasIdle = isIdle()
+  lastActivity = Date.now()
+  if (!wasIdle) return
+  void checkForChanges()
+  schedule()
 }
 
 export const subscribeToChanges = (listener: () => void) => {
   listeners.add(listener)
   if (!timer) {
-    timer = setInterval(() => void checkForChanges(), INTERVAL)
+    lastActivity = Date.now()
+    schedule()
     document.addEventListener('visibilitychange', onVisible)
+    for (const event of activityEvents) window.addEventListener(event, onActivity, { passive: true, capture: true })
     if (version === null) void checkForChanges()
   }
   return () => {
     listeners.delete(listener)
     if (listeners.size > 0 || !timer) return
-    clearInterval(timer)
+    clearTimeout(timer)
     timer = undefined
     document.removeEventListener('visibilitychange', onVisible)
+    for (const event of activityEvents) window.removeEventListener(event, onActivity, { capture: true })
   }
 }

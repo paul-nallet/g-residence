@@ -2,6 +2,7 @@ import {
   Building2,
   CalendarDays,
   ClipboardList,
+  ClipboardCheck,
   Coffee,
   Droplets,
   Home,
@@ -79,6 +80,17 @@ export const sections = [
       ['Signalements', 'Décrire un problème dans un lot ou dans les parties communes.'],
       ['Interventions', 'Enregistrer les rendez-vous techniques et ce qui a été réalisé.'],
       ['Travaux', 'Suivre les actions et les problèmes rencontrés.'],
+    ],
+  },
+  {
+    id: 'visits',
+    group: 'operations',
+    label: 'Visites techniques',
+    icon: ClipboardCheck,
+    description: 'Les tournées de contrôle de chaque bâtiment et leurs prochaines échéances.',
+    items: [
+      ['Visites', 'Planifier une visite puis constater chaque point par zone.'],
+      ['Échéances', 'Retrouver la dernière visite et planifier la prochaine.'],
     ],
   },
   {

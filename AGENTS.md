@@ -12,6 +12,10 @@ React 19, Astryx Neutral et Vite pour le front ; Effect 4 (HttpApi, Schema, serv
 
 D1 sera le stockage relationnel de la V1 ; R2 seulement quand les fichiers seront nécessaires. Aucune donnée privée ni aucun endpoint métier public avant l'authentification et le contrôle des permissions. La résidence porte le périmètre des données. Toute future requête métier doit être bornée à la résidence autorisée.
 
+## Coûts
+
+Aucun traitement en arrière-plan (Cron, Durable Object, Queue, Workflow, WebSocket) sans décision écrite et chiffrée. Un seul sondeur côté front, `frontend/lib/sync.ts` : jamais de rechargement périodique dans une page. Lire `docs/decisions/0006-couts-cloudflare.md`.
+
 ## Interface Astryx
 
 Importer `@astryxdesign/core/reset.css` et `@astryxdesign/core/astryx.css` à l'entrée. Pour chaque nouvelle page : `npx astryx build "<besoin>"`, puis `npx astryx template <nom> <chemin>` ; garder son cadre. Consulter `npx astryx docs layout` avant de modifier le cadre et `npx astryx component <Nom>` avant d'utiliser un composant inconnu.

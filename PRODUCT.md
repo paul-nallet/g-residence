@@ -1,6 +1,6 @@
 # Gestionnaire de résidence étudiante
 
-Statut : V1 approuvée et implémentée le 9 octobre 2026. GResidence est le nom technique provisoire du projet.
+Statut : V1 approuvée et implémentée le 9 octobre 2026, étendue jusqu’au 12 octobre 2026 (relevés, stocks, prestations, ménage, technique, boîte à idées, barre d’actions et AI Studio). GResidence est le nom technique provisoire du projet.
 
 ## Objectif
 
@@ -55,11 +55,36 @@ Préavis avec réception et départ prévu, sans calcul automatique de délai. C
 
 Calendrier semaine/mois et liste quotidienne compacte, fuseau Europe/Paris. Les dates de séjour et préavis sont civiles. Les heures de rendez-vous inexistantes ou ambiguës lors du changement d’heure sont rejetées.
 
-Bilan lundi-dimanche : entrées réelles, sorties réelles, états des lieux réalisés et préavis reçus actifs. Les événements prévus, annulés et préavis retirés sont exclus. Chaque génération reflète les corrections. Colonnes Date, Lot, Type d’événement, Nom, Prénom, Commentaire. Copie tabulée avec en-têtes et protection contre les formules ; commentaires multilignes aplatis pour préserver une ligne Excel par événement.
+Bilan lundi-dimanche, en Europe/Paris : entrées et sorties réelles, états des lieux réalisés, préavis reçus actifs, ménages réalisés avec leurs points signalés, signalements constatés, débuts et fins réels des travaux, notes et problèmes du journal, interventions réalisées, mouvements de stock, index constatés, saisies et corrections de chiffre d’affaires, retours de la boîte à idées et créations/corrections/archivages de lots. Les administrateurs voient aussi les comptes créés. Le calendrier est couvert par ses événements réalisés ; la vue d’ensemble et la barre d’actions ne créent pas d’événements supplémentaires. Équipement et AI Studio sont en préparation et ne produisent pas d’activité dans le bilan.
+
+Réalisations et constats à leur date métier ; journal, retours, comptes et modifications de lots à leur date d’enregistrement. Les prestations sont datées par la saisie ou correction, avec le mois concerné et le montant HT ou TTC : aucun chiffre d’affaires hebdomadaire n’est déduit d’une saisie mensuelle. Les événements seulement prévus, annulés et préavis retirés sont exclus. Chaque génération reflète les corrections et réouvertures ; les saisies de prestations conservent leur trace historique. Les changements de statut automatiques du journal technique ne doublonnent pas les débuts et fins réels.
+
+Tableau paginé côté API, copie de toute la semaine avec en-têtes Date, Module, Lot, Objet / lieu, Type d’événement, Intervenant, Nom, Prénom, Commentaire. Copie tabulée protégée contre les formules et commentaires multilignes aplatis. Les modifications de permissions et invitations ne disposent pas actuellement d’un historique daté et ne sont pas reconstruites depuis l’état actuel de l’équipe.
+
+## Périmètre livré
+
+| Domaine | État | Détail |
+| --- | --- | --- |
+| Comptes | Livré | Rôles administrateur, gestionnaire et ménage ; invitations par lien. |
+| Lots et mouvements | Livré | Bâtiments, lots, séjours, préavis, états des lieux, historique. |
+| Calendrier | Livré | États des lieux et interventions techniques, semaine, mois et jour. |
+| Reporting | Livré | Bilan hebdomadaire transversal, tableau paginé et copie Excel complète. |
+| Relevés | Livré | Compteurs des communs, index mensuels, récapitulatif annuel. |
+| Stock | Livré | Articles, catégories, vues, mouvements et alertes de stock faible. |
+| Prestations | Livré | Sources saisies TTC avec taux de TVA ou HT sans taux, saisie mensuelle, récapitulatif annuel HT, TTC et TVA, copie Excel. |
+| Ménage | Livré | Fiches modèles, planning par agent, checklist et réalisation. |
+| Technique et signalements | Livré | Lieux, fournisseurs, signalements, travaux, journal, interventions et visites techniques. |
+| Boîte à idées | Livré | Idées, demandes de fonctionnalités et bugs signés, filtrables par nature. |
+| Équipement | Spécifié | Standards par type de logement, constats aux états des lieux ou en inventaire libre, besoins rapprochés du stock (voir « Équipement des lots »). |
+
+Outils transverses : barre d’actions ⌘K (recherche et actions rapides par domaine), synchronisation automatique des pages ouvertes, AI Studio en préparation (désactivé sans fournisseur configuré, voir `docs/decisions/0003-ai-studio.md`).
 
 ## Suite à préciser
 
-Standard d’équipement et nature HT/TTC des recettes restent à définir. Hors V1 : import Excel, portail résident, documents signés, photos, checklists, technique, stocks et recettes. Récupération de mot de passe en libre-service reportée.
+- Passerelles entre domaines : anomalie de ménage vers signalement, checklist vers stock, récurrence du planning.
+- Usage de l’AI Studio hors local : validation de la transmission des données au fournisseur.
+
+Hors périmètre actuel : import Excel, portail résident, documents signés, photos, devis et factures, notifications et emails automatiques, récupération de mot de passe en libre-service, plusieurs résidences.
 
 ## Relevés des communs
 
@@ -93,7 +118,27 @@ Administrateurs et gestionnaires uniquement, dans la résidence autorisée. Une 
 
 Une seule saisie par source et par mois `AAAA-MM`, mois non futur. Montant en centimes entiers, positif ou nul, en euros, avec commentaire facultatif. Le suivi mensuel indique les sources à saisir et le total du mois. Historique par source trié par mois décroissant et paginé côté API. Correction possible depuis l’historique, y compris du mois, avec auteur et trace des valeurs avant/après conservée côté serveur. Les modifications de source sont tracées de la même manière.
 
-Récapitulatif annuel : une ligne par source, une colonne par mois, totaux par ligne et par mois ; un mois sans saisie reste vide et compte pour zéro dans les totaux. Copie tabulée pour Excel avec montants au format français et protection contre les formules, comme le bilan hebdomadaire. La nature HT ou TTC des montants reste à préciser.
+Récapitulatif annuel : une ligne par source, une colonne par mois, totaux par ligne et par mois ; un mois sans saisie reste vide et compte pour zéro dans les totaux. Copie tabulée pour Excel avec montants au format français et protection contre les formules, comme le bilan hebdomadaire.
+
+Décision du 12 octobre 2026 : chaque source a une nature de saisie. Par défaut, elle est « TTC avec taux » : les montants sont saisis TTC, tels qu’encaissés, avec un taux de TVA choisi parmi 0 %, 2,1 %, 5,5 %, 10 % et 20 % (20 % par défaut). Une source peut aussi être « HT sans taux » : les montants sont relevés directement HT, sans TVA calculée. Nature et taux se modifient avec trace avant/après.
+
+Nature et taux sont figés sur chaque saisie au moment de l’enregistrement : modifier la source ne réécrit pas les mois passés, une correction de saisie reprend les valeurs courantes. Pour une saisie TTC, HT et TVA sont calculés côté serveur en centimes, HT arrondi au centime le plus proche et TVA = TTC − HT. Pour une saisie HT, TVA et TTC restent vides.
+
+Suivi mensuel et historique affichent chaque montant avec sa nature (TTC ou HT). Le récapitulatif annuel et la copie Excel donnent un total HT sur toutes les sources ; les totaux TTC et TVA ne portent que sur les sources TTC et l’indiquent. Les saisies existantes deviennent TTC avec le taux par défaut de leur source.
+
+## Équipement des lots
+
+Décision du 12 octobre 2026 : définir l’équipement attendu dans chaque lot meublé, le constater et rapprocher les manquants du stock. Administrateurs et gestionnaires uniquement, dans la résidence autorisée ; l’agent de ménage n’y a pas accès.
+
+Standards : un standard a un nom unique sans distinction de casse et une liste ordonnée d’éléments, chacun avec un libellé, une quantité attendue entière et positive et, facultativement, un article de stock correspondant. Un standard s’associe à un ou plusieurs types de logement (valeur du champ type du lot, sans distinction de casse) ; un type n’a qu’un standard. Un seul standard par défaut couvre les lots dont le type n’a pas de standard. Modifier un standard ne change pas les constats passés.
+
+Constats : un constat porte sur un lot, une date civile non future, un auteur et un commentaire facultatif. Il part de l’état des lieux d’entrée ou de sortie du séjour, ou d’un inventaire libre lancé depuis la fiche du lot. À sa création, les éléments du standard applicable sont copiés avec leur quantité attendue ; on peut ajouter un élément propre au lot. Pour chaque élément on saisit la quantité constatée et un état : conforme, manquant (quantité inférieure à l’attendu) ou abîmé, avec remarque facultative. Un constat se termine quand chaque élément est traité ; un constat terminé n’est plus modifiable, une erreur se rattrape par un nouveau constat.
+
+Fiche du lot : le dernier constat terminé donne l’état d’équipement du lot (complet, manquants, abîmés) et l’historique des constats reste consultable. Un état des lieux réalisé sans constat ne bloque rien.
+
+Besoins des lots : la liste regroupe, pour le dernier constat terminé de chaque lot non archivé, les éléments manquants ou abîmés avec la quantité à fournir. Rien n’est retiré du stock automatiquement : depuis un besoin relié à un article, un gestionnaire enregistre une sortie de stock (même règle qu’une sortie manuelle, avec le lot en commentaire) et marque l’élément fourni ; le lot redevient complet au constat suivant ou quand tous ses besoins sont fournis. Un besoin sans article se marque fourni à la main. Filtres par bâtiment et par article, pagination côté API.
+
+Hors périmètre : photos, signature du résident, facturation des manquants au résident et création de signalement depuis un élément abîmé.
 
 ## Ménage
 
@@ -103,7 +148,7 @@ Fiches modèles réservées aux administrateurs et gestionnaires : nom unique, p
 
 Une tâche relie un lot actif, un agent (membre actif de l’équipe, quel que soit son rôle) et un jour civil, avec une consigne facultative. Plusieurs lots peuvent être planifiés en une fois ; un lot n’a qu’une tâche non annulée par jour. États prévu, réalisé et annulé ; seule une tâche prévue se modifie. Chaque point est à faire, fait (ou conforme) ou signalé non fait (ou en anomalie) avec un constat facultatif, avec auteur et heure. Terminer exige que chaque point soit traité, enregistre auteur, heure et commentaire. Les gestionnaires peuvent annuler, rouvrir ou rétablir une tâche.
 
-L’agent de ménage ne voit que ses propres tâches, en vue jour par défaut, et ne gère ni les fiches ni le planning. Les gestionnaires voient le planning par jour ou semaine, filtrable par agent. Hors périmètre : rattachement automatique au stock, création de signalement technique depuis une anomalie, récurrence automatique du planning et intégration au bilan hebdomadaire.
+L’agent de ménage ne voit que ses propres tâches, en vue jour par défaut, et ne gère ni les fiches ni le planning. Les gestionnaires voient le planning par jour ou semaine, filtrable par agent. Les ménages réalisés figurent au bilan hebdomadaire des gestionnaires, avec leur commentaire et leurs points signalés. Hors périmètre : rattachement automatique au stock, création de signalement technique depuis une anomalie et récurrence automatique du planning.
 
 
 ## Technique : lieux, fournisseurs, signalements et travaux
@@ -122,4 +167,30 @@ Journal : chaque chantier garde un fil daté et signé, jamais effacé. On y ajo
 
 Interventions : rendez-vous techniques rattachés à un chantier, avec date et heure (Europe/Paris, heures ambiguës ou inexistantes rejetées), durée, fournisseur facultatif parmi ceux du chantier, état prévu, réalisé ou annulé et compte rendu. Elles apparaissent au calendrier des gestionnaires et dans les prochains rendez-vous des lots concernés.
 
-Listes filtrables par statut et recherche, paginées côté API ; les travaux non terminés et les signalements ouverts sont listés en premier. Hors périmètre : photos, documents, devis et factures, montants, notifications et intégration au bilan hebdomadaire.
+Listes filtrables par statut et recherche, paginées côté API ; les travaux non terminés et les signalements ouverts sont listés en premier. Signalements, débuts et fins réels, notes et problèmes et interventions réalisées figurent au bilan hebdomadaire. Hors périmètre : photos, documents, devis et factures, montants et notifications.
+
+## Visites techniques des bâtiments
+
+Extension demandée le 12 octobre 2026 : rubrique autonome « Visites techniques » dans la sidenav, distincte de Technique. Administrateurs et gestionnaires uniquement, dans la résidence autorisée. Aucun modèle à créer avant une visite.
+
+Planification directe : bâtiment obligatoire, titre, jour prévu, fréquence hebdomadaire, mensuelle (par défaut), trimestrielle ou ponctuelle, puis points à contrôler. Une liste de départ de six observations visuelles est proposée (accès, éclairage, sols et murs, encombrement, fuites ou humidité, dégradations), personnalisable par zone, de 1 à 50 points. Elle ne constitue pas une checklist de conformité réglementaire. Le titre identifie une tournée dans un bâtiment ; les visites suivantes peuvent reprendre les mêmes points. Une seule visite prévue par tournée ; elle peut être reportée ou annulée. Chaque visite conserve ses points, son titre, son bâtiment et sa fréquence d’origine.
+
+La vue « Échéances » indique la fréquence modifiable, la dernière visite réalisée et la prochaine échéance, avec action pour planifier la prochaine en reprenant les points. La prochaine échéance part de la dernière date réelle de visite terminée : 7 jours, 1 mois ou 3 mois, en ramenant le jour au dernier jour du mois si nécessaire. Avant la première réalisation, le jour de la première visite reste la référence. Une annulation ne repousse pas l’échéance. Une tournée ponctuelle n’a pas d’échéance récurrente. Aucun rendez-vous créé automatiquement, aucune tâche de fond ni notification.
+
+Visite au calendrier en événement du jour, sans heure inventée. Chaque point reçoit un constat : à vérifier, conforme, anomalie ou non vérifié, avec auteur et heure ; anomalie et non vérifié exigent une explication. Terminer exige que chaque point soit traité et enregistre une date réelle non future, un auteur et un compte rendu facultatif. Visites terminées ou annulées en lecture seule.
+
+Après réalisation, une anomalie peut créer explicitement un signalement lié ; une seule création par point, datée du constat réel, avec zone et bâtiment dans la description. Le signalement conserve le parcours existant vers les travaux. Historique des visites avec recherche, filtres bâtiment et statut, pagination côté API. Compte rendu complet copiable pour Excel avec protection contre les formules ; visites réalisées, anomalies et points non vérifiés repris dans le bilan hebdomadaire. Modifications et liens tracés côté serveur. Synchronisation par le sondeur existant.
+
+Hors périmètre : photos, signature, documents PDF, notifications, génération automatique des rendez-vous et contrôles réglementaires spécialisés des équipements.
+
+## Boîte à idées
+
+Ajout du 11 octobre 2026 : chaque membre de l’équipe peut déposer une idée, une demande de fonctionnalité ou un bug, en 2 000 caractères au plus. Chaque entrée est signée et datée, sans modification ni suppression. La liste est filtrable par nature, paginée côté API et bornée à la résidence.
+
+## Priorités opérationnelles
+
+Ajout du 12 octobre 2026 : signalements, travaux et tâches de ménage ont une priorité Basse, Normale, Haute ou Urgente. Normale est la valeur par défaut, y compris pour les données existantes. Haute désigne un problème gênant à traiter rapidement ; Urgente une sécurité ou un service essentiel compromis. La priorité est choisie par le gestionnaire, distincte du statut, des dates prévues et des alertes de retard.
+
+Les travaux créés depuis un signalement reprennent sa priorité, ajustable à la création puis indépendamment. Les listes et chaque colonne du tableau de travaux sont filtrables par priorité et triées de la plus urgente à la plus basse, avec les éléments actifs avant les clos. Les changements de priorité technique sont tracés avant/après.
+
+Au ménage, la priorité porte sur chaque tâche, pas sur la fiche modèle ni ses points. Une planification de plusieurs lots applique le choix à toutes les tâches créées. Le gestionnaire peut la modifier tant que la tâche est prévue ; l’agent la consulte et peut filtrer son planning. Le planning conserve l’ordre des jours, puis place les tâches prévues avant les terminées et les annulées, avec les priorités les plus hautes en premier dans chaque groupe. Un report conserve la priorité. Les droits et le périmètre de résidence restent appliqués aux filtres et aux modifications.

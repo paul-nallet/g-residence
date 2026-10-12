@@ -5,7 +5,7 @@ export const Event = Schema.Struct({
   id: Schema.String,
   lotId: Schema.String,
   lotNumber: Schema.String,
-  kind: Schema.Literals(['entry', 'exit', 'inspection_entry', 'inspection_exit', 'intervention']),
+  kind: Schema.Literals(['entry', 'exit', 'inspection_entry', 'inspection_exit', 'intervention', 'technical_visit']),
   date: Schema.String,
   time: Schema.String,
   duration: Schema.Number,
@@ -13,11 +13,15 @@ export const Event = Schema.Struct({
   resident: Schema.String,
   comment: Schema.String,
   workId: Schema.optionalKey(Schema.String),
+  visitId: Schema.optionalKey(Schema.String),
   title: Schema.optionalKey(Schema.String),
   place: Schema.optionalKey(Schema.String),
 })
 export type Event = typeof Event.Type
 export const ReportRow = Schema.Struct({
+  module: Schema.String,
+  subject: Schema.String,
+  actor: Schema.String,
   date: Schema.String,
   lot: Schema.String,
   kind: Schema.String,
@@ -30,6 +34,7 @@ export const Report = Schema.Struct({
   from: Schema.String,
   to: Schema.String,
   rows: Schema.Array(ReportRow),
+  total: Schema.Number,
   tsv: Schema.String,
 })
 export type Report = typeof Report.Type
@@ -84,18 +89,26 @@ export const stayEvents = (stay: StayEvents, from: string, to: string, hidden: b
 export const sortEvents = (events: Event[]) =>
   events.sort((a, b) => (a.date + a.time + a.lotNumber + a.id).localeCompare(b.date + b.time + b.lotNumber + b.id))
 
-export const reportOf = (from: string, to: string, rows: ReportRow[]): Report => {
-  rows.sort((a, b) => (a.date + a.lot + a.kind).localeCompare(b.date + b.lot + b.kind))
+export const REPORT_PAGE_SIZE = 20
+
+export const reportOf = (from: string, to: string, rows: ReportRow[], page?: number): Report => {
+  rows.sort((a, b) =>
+    (a.date + a.module + a.lot + a.kind + a.subject).localeCompare(b.date + b.module + b.lot + b.kind + b.subject),
+  )
   return {
     from,
     to,
-    rows,
+    rows: page === undefined ? rows : rows.slice((page - 1) * REPORT_PAGE_SIZE, page * REPORT_PAGE_SIZE),
+    total: rows.length,
     tsv: toTSV([
-      ['Date', 'Lot', 'Type d’événement', 'Nom', 'Prénom', 'Commentaire'],
+      ['Date', 'Module', 'Lot', 'Objet / lieu', 'Type d’événement', 'Intervenant', 'Nom', 'Prénom', 'Commentaire'],
       ...rows.map((row) => [
         row.date.split('-').toReversed().join('/'),
+        row.module,
         row.lot,
+        row.subject,
         row.kind,
+        row.actor,
         row.lastName,
         row.firstName,
         row.comment,

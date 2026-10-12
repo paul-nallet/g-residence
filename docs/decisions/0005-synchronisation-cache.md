@@ -10,7 +10,7 @@ Statut : accepté, 11 octobre 2026.
 
 ## Pages à jour
 
-`frontend/lib/sync.ts` tient un sondeur unique partagé par toutes les requêtes `useQuery` affichées : un appel à `/api/sync` toutes les 10 secondes tant que l’onglet est visible, et immédiatement quand il le redevient. La première version sert de référence. Si elle change, chaque `useQuery` monté relance son chargement sans repasser par l’état de chargement. Une écriture réussie (`useMutation`, barre d’actions) déclenche une vérification immédiate.
+`frontend/lib/sync.ts` tient un sondeur unique partagé par toutes les requêtes `useQuery` affichées : un appel à `/api/sync` toutes les 10 secondes tant que l’onglet est visible, toutes les 60 secondes après 5 minutes sans interaction, et immédiatement quand il redevient visible ou que l’utilisateur reprend la main. La première version sert de référence. Si elle change, chaque `useQuery` monté relance son chargement sans repasser par l’état de chargement. Une écriture réussie (`useMutation`, barre d’actions) déclenche une vérification immédiate.
 
 Le sondage coûte une requête légère par onglet, et les données ne sont relues que lorsque quelque chose a changé.
 
@@ -20,7 +20,7 @@ Le sondage coûte une requête légère par onglet, et les données ne sont relu
 
 `ReadCachePort` est le port. Première implémentation : `memoryReadCache`, en mémoire de l’isolat, 500 entrées au plus (LRU), 60 secondes de durée de vie pour borner les réponses qui dépendent de la date du jour. Un adaptateur partagé entre isolats (Cache API, KV) pourra le remplacer sans toucher au reste.
 
-Une lecture servie depuis le cache coûte une requête SQL au lieu de deux pour la session et de une à dix pour les données. Le sondage de `/api/sync` passe lui-même par le cache.
+Une lecture servie depuis le cache coûte une requête SQL au lieu de deux pour la session et de une à dix pour les données. Le Worker répond à `/api/sync` directement depuis cette requête de contrôle (`x-cache: stamp`), sans passer par le handler : une seule requête SQL par sondage. Coûts chiffrés dans la décision 0006.
 
 ## Limites
 

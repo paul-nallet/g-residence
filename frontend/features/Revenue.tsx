@@ -11,7 +11,17 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Token } from '@astryxdesign/core/Token'
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { RevenueEntry, RevenueSource, RevenueYearRow } from '../../src/domain/revenue.ts'
+import {
+  DEFAULT_VAT_RATE,
+  type RevenueEntry,
+  type RevenueSource,
+  type RevenueYearRow,
+  vatBreakdown,
+  vatLabel,
+  type VatMode,
+  vatRates,
+  type VatRate,
+} from '../../src/domain/revenue.ts'
 import { today } from '../../src/domain/rules.ts'
 import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
@@ -37,6 +47,12 @@ import { Editor, Feedback, Loading, PeriodNav } from './shared.tsx'
 
 const money = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' })
 const euros = (cents: number) => money.format(cents / 100)
+const amountLabel = (cents: number, mode: VatMode | null) => euros(cents) + (mode === 'ht' ? ' HT' : ' TTC')
+const modeOptions = [
+  { value: 'ttc', label: 'TTC, avec taux de TVA' },
+  { value: 'ht', label: 'HT, sans taux' },
+]
+const rateOptions = vatRates.map((rate) => ({ value: String(rate), label: vatLabel('ttc', rate).slice(4) }))
 const compact = new Intl.NumberFormat('fr-FR', {
   style: 'currency',
   currency: 'EUR',
@@ -67,8 +83,16 @@ const monthOptions = Array.from({ length: 12 }, (_, index) => {
 
 function SourceEditor({ source, close, saved }: { source?: RevenueSource; close: () => void; saved: () => void }) {
   const [name, setName] = useState(source?.name ?? ''),
-    [description, setDescription] = useState(source?.description ?? '')
+    [description, setDescription] = useState(source?.description ?? ''),
+    [mode, setMode] = useState<VatMode>(source?.vat_mode ?? 'ttc'),
+    [rate, setRate] = useState(String(source?.vat_rate ?? DEFAULT_VAT_RATE))
   const mutation = useMutation()
+  const payload = {
+    name,
+    description,
+    vat_mode: mode,
+    vat_rate: mode === 'ttc' ? (Number(rate) as VatRate) : null,
+  }
   return (
     <Editor
       title={source ? 'Modifier la source' : 'Ajouter une source de prestation'}
@@ -80,8 +104,8 @@ function SourceEditor({ source, close, saved }: { source?: RevenueSource; close:
           () =>
             call((client) =>
               source
-                ? client.revenue.update({ params: { id: source.id }, payload: { name, description } })
-                : client.revenue.create({ payload: { name, description } }),
+                ? client.revenue.update({ params: { id: source.id }, payload })
+                : client.revenue.create({ payload }),
             ),
           saved,
         )
@@ -96,6 +120,18 @@ function SourceEditor({ source, close, saved }: { source?: RevenueSource; close:
         placeholder="Café, snacks, laverie, impressions…"
       />
       <TextInput label="Description" value={description} onChange={setDescription} isOptional />
+      <Selector
+        label="Saisie des montants"
+        value={mode}
+        onChange={(value) => setMode(value === 'ht' ? 'ht' : 'ttc')}
+        options={modeOptions}
+      />
+      {mode === 'ttc' && <Selector label="Taux de TVA" value={rate} onChange={setRate} options={rateOptions} />}
+      {source && (
+        <Text color="secondary">
+          Les mois déjà saisis gardent leur nature et leur taux ; une correction reprend ceux-ci.
+        </Text>
+      )}
     </Editor>
   )
 }
@@ -158,7 +194,8 @@ function EntryEditor({
       </HStack>
       {future && <Feedback error="Le mois saisi ne peut pas être dans le futur." />}
       <TextInput
-        label="Chiffre d’affaires du mois (€)"
+        label={`Chiffre d’affaires du mois (€ ${source.vat_mode === 'ht' ? 'HT' : 'TTC'})`}
+        description={'Saisie ' + vatLabel(source.vat_mode, source.vat_rate) + '.'}
         value={amount}
         onChange={setAmount}
         isRequired
@@ -168,10 +205,17 @@ function EntryEditor({
       {amount && cents === null && (
         <Feedback error="Saisissez un montant positif ou nul, avec au plus deux décimales." />
       )}
+      {cents !== null && source.vat_mode === 'ttc' && (
+        <Text color="secondary">
+          Soit {euros(vatBreakdown(cents, 'ttc', source.vat_rate).net_cents)} HT et{' '}
+          {euros(vatBreakdown(cents, 'ttc', source.vat_rate).vat_cents ?? 0)} de TVA.
+        </Text>
+      )}
       <TextInput label="Commentaire" value={comment} onChange={setComment} isOptional />
       {!entry && source.latest_period && source.latest_amount !== null && (
         <Text color="secondary">
-          Dernière saisie : {euros(source.latest_amount)} en {periodLabel(source.latest_period)}.
+          Dernière saisie : {amountLabel(source.latest_amount, source.latest_vat_mode)} en{' '}
+          {periodLabel(source.latest_period)}.
         </Text>
       )}
     </Editor>
@@ -180,7 +224,15 @@ function EntryEditor({
 
 const tooltipValue = (value: unknown) => (typeof value === 'number' ? money.format(value) : 'Aucune saisie')
 
-function RevenueChart({ year, months }: { year: number; months: ReadonlyArray<number | null> }) {
+function RevenueChart({
+  year,
+  months,
+  unit,
+}: {
+  year: number
+  months: ReadonlyArray<number | null>
+  unit: 'HT' | 'TTC'
+}) {
   const current = today()
   const last = Math.max(
     months.findLastIndex((value) => value !== null),
@@ -206,7 +258,7 @@ function RevenueChart({ year, months }: { year: number; months: ReadonlyArray<nu
         data={data}
         margin={chartMargin}
         accessibilityLayer
-        title={`Chiffre d’affaires ${year} par mois et cumul annuel`}
+        title={`Chiffre d’affaires ${unit} ${year} par mois et cumul annuel`}
       >
         <CartesianGrid {...gridProps} />
         <XAxis dataKey="month" {...xAxisProps} />
@@ -226,7 +278,7 @@ function RevenueChart({ year, months }: { year: number; months: ReadonlyArray<nu
         <Bar
           yAxisId="month"
           dataKey="amount"
-          name="CA du mois"
+          name={'CA du mois ' + unit}
           fill={chartColors.blue}
           radius={barRadius}
           maxBarSize={40}
@@ -234,7 +286,7 @@ function RevenueChart({ year, months }: { year: number; months: ReadonlyArray<nu
         <Line
           yAxisId="cumulative"
           dataKey="cumulative"
-          name="Cumul annuel"
+          name={'Cumul annuel ' + unit}
           stroke={chartColors.orange}
           {...lineProps}
           connectNulls={false}
@@ -269,9 +321,12 @@ function SourceRecap({ source, version }: { source: RevenueSource; version: numb
         <Card>
           <VStack gap={2}>
             <Text type="label">
-              Total {year} : {euros(row?.total ?? 0)}
+              Total {year} : {euros(row?.total_net ?? 0)} HT
+              {row?.total_vat === null || row?.total_vat === undefined
+                ? ''
+                : `, dont TVA ${euros(row.total_vat)} sur les mois TTC`}
             </Text>
-            <RevenueChart year={year} months={row?.months ?? Array.from({ length: 12 }, () => null)} />
+            <RevenueChart year={year} months={row?.net ?? Array.from({ length: 12 }, () => null)} unit="HT" />
           </VStack>
         </Card>
       )}
@@ -316,7 +371,10 @@ function SourceHistory({ source, changed }: { source: RevenueSource; changed: ()
       header={
         <HStack gap={3} wrap="wrap" hAlign="between">
           <VStack gap={1}>
-            <Heading level={1}>{source.name}</Heading>
+            <HStack gap={2} vAlign="center">
+              <Heading level={1}>{source.name}</Heading>
+              <Token label={'Saisie ' + vatLabel(source.vat_mode, source.vat_rate)} color="gray" />
+            </HStack>
             {source.description && <Text>{source.description}</Text>}
           </VStack>
           <HStack gap={2} wrap="wrap">
@@ -349,9 +407,26 @@ function SourceHistory({ source, changed }: { source: RevenueSource; changed: ()
             },
             {
               key: 'amount_cents',
-              header: 'Chiffre d’affaires',
+              header: 'Montant saisi',
               width: proportional(1),
-              renderCell: (row) => <Text>{euros(row.amount_cents)}</Text>,
+              renderCell: (row) => (
+                <VStack gap={1}>
+                  <Text>{amountLabel(row.amount_cents, row.vat_mode)}</Text>
+                  {row.vat_mode === 'ttc' && <Text type="supporting">{vatLabel(row.vat_mode, row.vat_rate)}</Text>}
+                </VStack>
+              ),
+            },
+            {
+              key: 'net_cents',
+              header: 'HT',
+              width: proportional(1),
+              renderCell: (row) => <Text>{euros(row.net_cents)}</Text>,
+            },
+            {
+              key: 'vat_cents',
+              header: 'TVA',
+              width: proportional(1),
+              renderCell: (row) => <Text>{row.vat_cents === null ? '—' : euros(row.vat_cents)}</Text>,
             },
             { key: 'comment', header: 'Commentaire', width: proportional(2) },
             { key: 'actor', header: 'Saisi ou corrigé par', width: proportional(1) },
@@ -402,6 +477,60 @@ function SourceHistory({ source, changed }: { source: RevenueSource; changed: ()
   )
 }
 
+type YearLine = {
+  id: string
+  name: string
+  nature: string
+  footer: boolean
+  months: ReadonlyArray<number | null>
+  net: number | null
+  vat: number | null
+}
+type YearData = {
+  rows: ReadonlyArray<RevenueYearRow>
+  net: { months: ReadonlyArray<number>; total: number }
+  gross: { months: ReadonlyArray<number>; total: number }
+  vat: { months: ReadonlyArray<number>; total: number }
+}
+const yearLines = (data: YearData): YearLine[] => [
+  ...data.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    nature: 'Saisie ' + vatLabel(row.vat_mode, row.vat_rate),
+    footer: false,
+    months: row.months,
+    net: row.total_net,
+    vat: row.total_vat,
+  })),
+  {
+    id: 'net',
+    name: 'Total HT',
+    nature: 'Toutes sources',
+    footer: true,
+    months: data.net.months,
+    net: data.net.total,
+    vat: null,
+  },
+  {
+    id: 'gross',
+    name: 'Total TTC',
+    nature: 'Sources saisies TTC',
+    footer: true,
+    months: data.gross.months,
+    net: null,
+    vat: null,
+  },
+  {
+    id: 'vat',
+    name: 'TVA',
+    nature: 'Sources saisies TTC',
+    footer: true,
+    months: data.vat.months,
+    net: null,
+    vat: data.vat.total,
+  },
+]
+
 export function RevenueYear() {
   const [year, setYear] = useState(Number(today().slice(0, 4))),
     [copied, setCopied] = useState(''),
@@ -430,7 +559,10 @@ export function RevenueYear() {
       header={
         <VStack gap={2}>
           <Heading level={1}>Récapitulatif {year}</Heading>
-          <Text color="secondary">Chiffre d’affaires de chaque source, mois par mois, prêt à coller dans Excel.</Text>
+          <Text color="secondary">
+            Montants mois par mois tels que saisis, TTC ou HT selon la source, avec les totaux HT et TVA, prêts à coller
+            dans Excel.
+          </Text>
         </VStack>
       }
     >
@@ -450,11 +582,13 @@ export function RevenueYear() {
           <Card>
             <VStack gap={2}>
               <Text type="label">
-                Total {year} : {euros(result.data.total)}
+                Total {year} : {euros(result.data.net.total)} HT toutes sources · {euros(result.data.gross.total)} TTC
+                et {euros(result.data.vat.total)} de TVA sur les sources TTC
               </Text>
               <RevenueChart
                 year={year}
-                months={result.data.months.map((value, index) =>
+                unit="HT"
+                months={result.data.net.months.map((value, index) =>
                   result.data!.rows.some((row) => row.months[index] !== null) ? value : null,
                 )}
               />
@@ -462,10 +596,7 @@ export function RevenueYear() {
           </Card>
           {result.data.rows.length ? (
             <Table
-              data={[
-                ...result.data.rows,
-                { id: 'total', name: 'Total', months: result.data.months, total: result.data.total },
-              ]}
+              data={yearLines(result.data)}
               idKey="id"
               dividers="rows"
               columns={[
@@ -473,26 +604,38 @@ export function RevenueYear() {
                   key: 'name',
                   header: 'Source',
                   width: proportional(2),
-                  renderCell: (row: RevenueYearRow) =>
-                    row.id === 'total' ? (
-                      <Text type="label">Total</Text>
+                  renderCell: (row: YearLine) =>
+                    row.footer ? (
+                      <VStack gap={1}>
+                        <Text type="label">{row.name}</Text>
+                        <Text type="supporting">{row.nature}</Text>
+                      </VStack>
                     ) : (
-                      <Link href={'#services/' + row.id}>{row.name}</Link>
+                      <VStack gap={1}>
+                        <Link href={'#services/' + row.id}>{row.name}</Link>
+                        <Text type="supporting">{row.nature}</Text>
+                      </VStack>
                     ),
                 },
                 ...periods.map((period, index) => ({
                   key: period,
                   header: periodLabel(period, 'short'),
                   width: proportional(1),
-                  renderCell: (row: RevenueYearRow) => (
+                  renderCell: (row: YearLine) => (
                     <Text>{row.months[index] === null ? '—' : euros(row.months[index]!)}</Text>
                   ),
                 })),
                 {
-                  key: 'total',
-                  header: 'Total',
+                  key: 'net',
+                  header: 'Total HT',
                   width: proportional(1),
-                  renderCell: (row: RevenueYearRow) => <Text type="label">{euros(row.total)}</Text>,
+                  renderCell: (row: YearLine) => <Text type="label">{row.net === null ? '—' : euros(row.net)}</Text>,
+                },
+                {
+                  key: 'vat',
+                  header: 'TVA',
+                  width: proportional(1),
+                  renderCell: (row: YearLine) => <Text>{row.vat === null ? '—' : euros(row.vat)}</Text>,
                 },
               ]}
             />
@@ -567,7 +710,7 @@ export function Revenue() {
       <Text>
         Suivi de {periodLabel(month)}
         {result.data
-          ? ` : ${euros(result.data.month_total)} saisis, ${result.data.pending} source${result.data.pending > 1 ? 's' : ''} à saisir.`
+          ? ` : ${euros(result.data.month_net)} HT saisis, dont ${euros(result.data.month_gross)} TTC sur les sources TTC ; ${result.data.pending} source${result.data.pending > 1 ? 's' : ''} à saisir.`
           : '.'}
       </Text>
       <Feedback success={success} />
@@ -589,7 +732,11 @@ export function Revenue() {
               renderCell: (row) => (
                 <VStack gap={1}>
                   <Link href={'#services/' + row.id}>{row.name}</Link>
-                  {row.description && <Text type="supporting">{row.description}</Text>}
+                  <Text type="supporting">
+                    {'Saisie ' +
+                      vatLabel(row.vat_mode, row.vat_rate) +
+                      (row.description ? ' · ' + row.description : '')}
+                  </Text>
                 </VStack>
               ),
             },
@@ -599,7 +746,9 @@ export function Revenue() {
               width: proportional(2),
               renderCell: (row) => (
                 <VStack gap={1}>
-                  <Text>{row.latest_amount === null ? 'Aucune saisie' : euros(row.latest_amount)}</Text>
+                  <Text>
+                    {row.latest_amount === null ? 'Aucune saisie' : amountLabel(row.latest_amount, row.latest_vat_mode)}
+                  </Text>
                   {row.latest_period && <Text type="supporting">{periodLabel(row.latest_period)}</Text>}
                 </VStack>
               ),
@@ -612,7 +761,7 @@ export function Revenue() {
                 row.month_amount === null ? (
                   <Token label="À saisir" color="gray" />
                 ) : (
-                  <Token label={euros(row.month_amount)} color="green" />
+                  <Token label={amountLabel(row.month_amount, row.month_vat_mode)} color="green" />
                 ),
             },
             {

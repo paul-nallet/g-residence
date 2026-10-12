@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>GResidence</title>
+  <rect width="32" height="32" rx="2" fill="#032230" />
+  <path
+    d="M24 10a10 10 0 1 0 0 12v-6h-9"
+    fill="none"
+    stroke="#ffcc00"
+    stroke-width="4"
+    stroke-linejoin="miter"
+  />
+</svg>

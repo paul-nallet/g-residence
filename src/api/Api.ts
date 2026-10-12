@@ -1,3 +1,18 @@
+import {
+  VisitTemplateInput,
+  VisitTemplate,
+  VisitTemplatePage,
+  TemplateQuery,
+  VisitQuery,
+  VisitPage,
+  VisitDetail,
+  VisitCreate,
+  VisitDirectCreate,
+  VisitPlan,
+  VisitPointUpdate,
+  VisitAction,
+} from '../domain/visits.ts'
+import { Priority } from '../domain/priority.ts'
 import { Schema, SchemaIssue } from 'effect'
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from 'effect/http-api'
 import { CurrentUser } from '../domain/CurrentUser.ts'
@@ -258,7 +273,7 @@ export class CalendarGroup extends HttpApiGroup.make('calendar')
 export class ReportsGroup extends HttpApiGroup.make('reports')
   .add(
     HttpApiEndpoint.get('weekly', '/reports/weekly', {
-      query: { date: CivilDate },
+      query: { date: CivilDate, page: Schema.optionalKey(PageNumber(1000000)) },
       success: Report,
       error: errors,
     }),
@@ -308,6 +323,67 @@ export class MetersGroup extends HttpApiGroup.make('meters')
       error: errors,
     }),
   )
+  .middleware(Authorization) {}
+export class VisitsGroup extends HttpApiGroup.make('visits')
+  .add(
+    HttpApiEndpoint.post('createDirect', '/technical/visits/new', {
+      payload: VisitDirectCreate,
+      success: Schema.Struct({ id: Schema.String }),
+      error: errors,
+    }),
+    HttpApiEndpoint.get('templates', '/technical/visit-templates', {
+      query: TemplateQuery,
+      success: VisitTemplatePage,
+      error: errors,
+    }),
+    HttpApiEndpoint.get('template', '/technical/visit-templates/:id', {
+      params: id,
+      success: VisitTemplate,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('createTemplate', '/technical/visit-templates', {
+      payload: VisitTemplateInput,
+      success: Schema.Struct({ id: Schema.String }),
+      error: errors,
+    }),
+    HttpApiEndpoint.put('updateTemplate', '/technical/visit-templates/:id', {
+      params: id,
+      payload: VisitTemplateInput,
+      success: Schema.Struct({ id: Schema.String }),
+      error: errors,
+    }),
+    HttpApiEndpoint.get('list', '/technical/visits', { query: VisitQuery, success: VisitPage, error: errors }),
+    HttpApiEndpoint.post('create', '/technical/visits', {
+      payload: VisitCreate,
+      success: Schema.Struct({ id: Schema.String }),
+      error: errors,
+    }),
+    HttpApiEndpoint.get('detail', '/technical/visits/:id', { params: id, success: VisitDetail, error: errors }),
+    HttpApiEndpoint.patch('plan', '/technical/visits/:id', {
+      params: id,
+      payload: VisitPlan,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.patch('point', '/technical/visits/:id/points/:pointId', {
+      params: { ...id, pointId: Schema.String },
+      payload: VisitPointUpdate,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('act', '/technical/visits/:id/actions', {
+      params: id,
+      payload: VisitAction,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('issue', '/technical/visits/:id/points/:pointId/issue', {
+      params: { ...id, pointId: Schema.String },
+      success: Schema.Struct({ id: Schema.String }),
+      error: errors,
+    }),
+  )
+  .middleware(Management)
   .middleware(Authorization) {}
 export class StockGroup extends HttpApiGroup.make('stock')
   .add(
@@ -431,7 +507,12 @@ export class CleaningGroup extends HttpApiGroup.make('cleaning')
     }),
     HttpApiEndpoint.delete('removeTemplate', '/cleaning/templates/:id', { params: id, success: Ok, error: errors }),
     HttpApiEndpoint.get('tasks', '/cleaning/tasks', {
-      query: { from: CivilDate, to: CivilDate, agent: Schema.optionalKey(Schema.String) },
+      query: {
+        from: CivilDate,
+        to: CivilDate,
+        agent: Schema.optionalKey(Schema.String),
+        priority: Schema.optionalKey(Priority),
+      },
       success: Schema.Array(CleaningTask),
       error: errors,
     }),
@@ -580,6 +661,7 @@ export class Api extends HttpApi.make('gresidence')
   .add(ReportsGroup)
   .add(MetersGroup)
   .add(StockGroup)
+  .add(VisitsGroup)
   .add(RevenueGroup)
   .add(CleaningGroup)
   .add(TechnicalGroup)

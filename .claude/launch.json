@@ -72,6 +72,24 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "dev", "--port", "8803", "--persist-to", ".wrangler/overview-validation"],
       "port": 8803
+    },
+    {
+      "name": "bundle-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8804", "--persist-to", ".wrangler/bundle-validation"],
+      "port": 8804
+    },
+    {
+      "name": "sync-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8805", "--persist-to", ".wrangler/sync-validation"],
+      "port": 8805
+    },
+    {
+      "name": "vat-validation",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8805", "--persist-to", ".wrangler/vat-validation"],
+      "port": 8805
     }
   ]
 }
