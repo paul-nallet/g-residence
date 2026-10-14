@@ -298,6 +298,7 @@ export class MetersGroup extends HttpApiGroup.make('meters')
     }),
     HttpApiEndpoint.get('detail', '/meters/:id', { params: id, success: Meter, error: errors }),
     HttpApiEndpoint.post('create', '/meters', { payload: MeterInput, success: Ok, error: errors }),
+    HttpApiEndpoint.patch('update', '/meters/:id', { params: id, payload: MeterInput, success: Ok, error: errors }),
     HttpApiEndpoint.get('readings', '/meters/:id/readings', {
       params: id,
       query: { page: Schema.optionalKey(PageNumber(1000000)) },

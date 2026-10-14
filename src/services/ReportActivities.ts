@@ -65,6 +65,10 @@ export const reportActivities = Effect.fn('Agenda.activities')(function* (
       'Index constaté' AS kind,u.name AS actor,'Index : ' || r.value || ' ' || CASE m.unit WHEN 'm3' THEN 'm³' ELSE m.unit END AS comment
       FROM meter_readings r JOIN meters m ON m.id=r.meter_id JOIN users u ON u.id=r.actor_id
       WHERE r.residence_id=? AND r.observed_on BETWEEN ? AND ?`),
+    timed(`SELECT h.created_at AS date,'Relevés' AS module,'' AS lot,
+      json_extract(h.after_json,'$.name') || ' · ' || json_extract(h.after_json,'$.location') AS subject,
+      h.action AS kind,u.name AS actor,'' AS comment FROM history h JOIN users u ON u.id=h.actor_id
+      WHERE h.residence_id=? AND h.created_at>=? AND h.created_at<? AND h.lot_id IS NULL AND h.action='Compteur corrigé'`),
     timed(`SELECT c.created_at AS date,'Prestations' AS module,'' AS lot,s.name AS subject,
       CASE WHEN c.before_json IS NULL THEN 'Chiffre d’affaires saisi' ELSE 'Chiffre d’affaires corrigé' END AS kind,
       u.name AS actor,'Période : ' || json_extract(c.after_json,'$.period') || ' · ' ||

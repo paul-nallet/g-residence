@@ -21,6 +21,7 @@ export const MetersLive = HttpApiBuilder.group(
       .handle('list', ({ query }) => toHttp(meters.list(query.month, query.page, query.pending === 'true')))
       .handle('detail', ({ params }) => toHttp(meters.detail(params.id)))
       .handle('create', ({ payload }) => toHttp(meters.create(payload)))
+      .handle('update', ({ params, payload }) => toHttp(meters.update(params.id, payload)))
       .handle('readings', ({ params, query }) => toHttp(meters.readings(params.id, query.page)))
       .handle('consumption', ({ params, query }) => toHttp(meters.consumption(params.id, query.year)))
       .handle('record', ({ params, payload }) => toHttp(meters.record(params.id, null, payload)))

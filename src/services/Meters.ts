@@ -90,6 +90,51 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
+  const update = Effect.fn('Meters.update')(function* (id: string, input: typeof MeterInput.Type) {
+    const me = yield* manager
+    const before = yield* db.first<typeof MeterInput.Type & { readings: number }>(
+      sql(
+        `SELECT name,location,reference,kind,unit,EXISTS(SELECT 1 FROM meter_readings r WHERE r.meter_id=m.id AND r.residence_id=m.residence_id) AS readings
+        FROM meters m WHERE id=? AND residence_id=?`,
+        id,
+        me.residenceId,
+      ),
+    )
+    if (!before) return yield* new MeterNotFound()
+    const { readings, ...previous } = before
+    if (readings && (input.kind !== previous.kind || input.unit !== previous.unit))
+      return yield* new InvalidInput({
+        message: 'L’énergie et l’unité ne peuvent plus changer après un premier relevé. Créez un nouveau compteur.',
+      })
+    if (!unitMatchesKind(input.kind, input.unit))
+      return yield* new InvalidInput({ message: 'Utilisez m³ pour l’eau et kWh pour l’électricité.' })
+    yield* db
+      .batch([
+        sql(
+          'UPDATE meters SET name=?,location=?,reference=?,kind=?,unit=? WHERE id=? AND residence_id=?',
+          input.name,
+          input.location,
+          input.reference,
+          input.kind,
+          input.unit,
+          id,
+          me.residenceId,
+        ),
+        sql(
+          'INSERT INTO history(id,residence_id,lot_id,actor_id,action,before_json,after_json,created_at) VALUES(?,?,NULL,?,?,?,?,?)',
+          crypto.randomUUID(),
+          me.residenceId,
+          me.id,
+          'Compteur corrigé',
+          JSON.stringify({ id, ...previous }),
+          JSON.stringify({ id, ...input }),
+          yield* now,
+        ),
+      ])
+      .pipe(onViolation('UNIQUE constraint failed: meters.', () => new MeterNameTaken()))
+    return { ok: true }
+  })
+
   const readings = Effect.fn('Meters.readings')(function* (id: string, page = 1) {
     const me = yield* find(id)
     const [items, count] = yield* Effect.all([
@@ -182,7 +227,7 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  return { list, detail, create, readings, consumption, record }
+  return { list, detail, create, update, readings, consumption, record }
 })
 
 export class Meters extends Context.Service<Meters, Effect.Success<typeof make>>()('gresidence/Meters') {

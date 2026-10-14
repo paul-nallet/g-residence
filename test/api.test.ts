@@ -699,6 +699,9 @@ test('compteurs des communs : index datés, mois suivi, corrections et isolation
     const id = list.items[0]!.id
     assert.equal(list.items[0]!.latest_value, null)
     assert.equal(((await (await e.request('/meters?month=2026-09&pending=true')).json()) as typeof list).total, 1)
+    const meterPath = '/meters/' + id
+    assert.equal((await e.request(meterPath, 'PATCH', { ...input, kind: 'gas', unit: 'kWh' })).status, 200)
+    assert.equal((await e.request(meterPath, 'PATCH', input)).status, 200)
     const path = '/meters/' + id + '/readings'
     for (const observed_on of ['2026-02-30', '2999-01-01'])
       assert.equal((await e.request(path, 'POST', { observed_on, value: 10 })).status, 400)
@@ -707,6 +710,26 @@ test('compteurs des communs : index datés, mois suivi, corrections et isolation
     assert.equal((await e.request(path, 'POST', { observed_on: '2026-09-01', value: 12 })).status, 409)
     assert.equal((await e.request(path, 'POST', { observed_on: '2026-09-30', value: 125.75 })).status, 200)
     assert.equal((await e.request(path, 'POST', { observed_on: '2026-08-31', value: 95 })).status, 200)
+    assert.equal((await e.request(meterPath, 'PATCH', { ...input, kind: 'gas' })).status, 400)
+    assert.equal((await e.request('/meters/inconnu', 'PATCH', input)).status, 404)
+    const renamed = { ...input, name: 'Eau du hall', location: 'Hall', reference: 'EAU-02' }
+    assert.equal((await e.request(meterPath, 'PATCH', renamed)).status, 200)
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries((await (await e.request(meterPath)).json()) as Record<string, unknown>).filter(([key]) =>
+          Object.hasOwn(input, key),
+        ),
+      ),
+      renamed,
+    )
+    assert.equal(
+      (
+        e.sqlite.prepare("SELECT COUNT(*) AS count FROM history WHERE action='Compteur corrigé'").get() as {
+          count: number
+        }
+      ).count,
+      3,
+    )
     list = (await (await e.request('/meters?month=2026-09')).json()) as typeof list
     assert.equal(list.items[0]!.latest_value, 125.75)
     assert.equal(list.items[0]!.latest_date, '2026-09-30')
@@ -769,7 +792,7 @@ test('compteurs des communs : index datés, mois suivi, corrections et isolation
     e.sqlite.exec('PRAGMA foreign_keys=ON')
     assert.equal((await e.request('/meters/foreign-meter')).status, 404)
     const meter = (await (await e.request('/meters/' + id)).json()) as { name: string; latest_value: number }
-    assert.deepEqual([meter.name, meter.latest_value], ['Eau des communs', 126.5])
+    assert.deepEqual([meter.name, meter.latest_value], ['Eau du hall', 126.5])
     assert.equal((await e.request('/meters/foreign-meter/readings')).status, 404)
     assert.equal((await e.request('/meters/foreign-meter/consumption?year=2026')).status, 404)
     assert.equal(

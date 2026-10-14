@@ -35,22 +35,25 @@ const unitLabel = (unit: string) => (unit === 'm3' ? 'm³' : 'kWh')
 const indexLabel = (value: number, unit: string) =>
   `${value.toLocaleString('fr-FR', { maximumFractionDigits: 20 })} ${unitLabel(unit)}`
 
-function MeterEditor({ close, saved }: { close: () => void; saved: () => void }) {
-  const [name, setName] = useState(''),
-    [location, setLocation] = useState(''),
-    [reference, setReference] = useState(''),
-    [kind, setKind] = useState<MeterKind>('electricity'),
-    [unit, setUnit] = useState<'m3' | 'kWh'>('kWh')
+function MeterEditor({ meter, close, saved }: { meter?: Meter; close: () => void; saved: () => void }) {
+  const [name, setName] = useState(meter?.name ?? ''),
+    [location, setLocation] = useState(meter?.location ?? ''),
+    [reference, setReference] = useState(meter?.reference ?? ''),
+    [kind, setKind] = useState<MeterKind>(meter?.kind ?? 'electricity'),
+    [unit, setUnit] = useState<'m3' | 'kWh'>(meter?.unit ?? 'kWh'),
+    locked = !!meter?.latest_date
   const mutation = useMutation()
   return (
     <Editor
-      title="Ajouter un compteur des communs"
+      title={meter ? 'Modifier le compteur' : 'Ajouter un compteur des communs'}
       close={close}
       submit={() =>
-        void mutation.run(
-          () => call((client) => client.meters.create({ payload: { name, location, reference, kind, unit } })),
-          saved,
-        )
+        void mutation.run(() => {
+          const payload = { name, location, reference, kind, unit }
+          return call((client) =>
+            meter ? client.meters.update({ params: { id: meter.id }, payload }) : client.meters.create({ payload }),
+          )
+        }, saved)
       }
       busy={mutation.busy}
       error={mutation.error}
@@ -71,27 +74,35 @@ function MeterEditor({ close, saved }: { close: () => void; saved: () => void })
         placeholder="Local technique, sous-sol…"
       />
       <TextInput label="Référence ou numéro du compteur" value={reference} onChange={setReference} isOptional />
-      <Selector
-        label="Énergie ou fluide"
-        value={kind}
-        onChange={(value) => {
-          setKind(value as MeterKind)
-          setUnit(value === 'electricity' ? 'kWh' : 'm3')
-        }}
-        options={Object.entries(kindLabels).map(([value, label]) => ({ value, label }))}
-      />
-      {kind === 'gas' ? (
-        <Selector
-          label="Unité affichée sur le compteur"
-          value={unit}
-          onChange={(value) => setUnit(value as 'm3' | 'kWh')}
-          options={[
-            { value: 'm3', label: 'm³' },
-            { value: 'kWh', label: 'kWh' },
-          ]}
-        />
+      {locked ? (
+        <Text color="secondary">
+          {kindLabels[kind]} · {unitLabel(unit)}. L’énergie et l’unité ne peuvent plus changer après un premier relevé.
+        </Text>
       ) : (
-        <Text>Unité : {unitLabel(unit)}</Text>
+        <>
+          <Selector
+            label="Énergie ou fluide"
+            value={kind}
+            onChange={(value) => {
+              setKind(value as MeterKind)
+              setUnit(value === 'electricity' ? 'kWh' : 'm3')
+            }}
+            options={Object.entries(kindLabels).map(([value, label]) => ({ value, label }))}
+          />
+          {kind === 'gas' ? (
+            <Selector
+              label="Unité affichée sur le compteur"
+              value={unit}
+              onChange={(value) => setUnit(value as 'm3' | 'kWh')}
+              options={[
+                { value: 'm3', label: 'm³' },
+                { value: 'kWh', label: 'kWh' },
+              ]}
+            />
+          ) : (
+            <Text>Unité : {unitLabel(unit)}</Text>
+          )}
+        </>
       )}
     </Editor>
   )
@@ -313,6 +324,7 @@ export function MeterDetail({ id }: { id: string }) {
 function MeterHistory({ meter, changed }: { meter: Meter; changed: () => void }) {
   const [page, setPage] = useState(1),
     [editor, setEditor] = useState<Reading | 'new' | null>(null),
+    [editing, setEditing] = useState(false),
     [success, setSuccess] = useState(''),
     [version, setVersion] = useState(0)
   const load = useCallback(
@@ -340,7 +352,10 @@ function MeterHistory({ meter, changed }: { meter: Meter; changed: () => void })
                 {meter.reference ? ' · Réf. ' + meter.reference : ''}
               </Text>
             </VStack>
-            <Button label="Saisir un relevé" variant="primary" onClick={() => setEditor('new')} />
+            <HStack gap={2} wrap="wrap">
+              <Button label="Modifier le compteur" onClick={() => setEditing(true)} />
+              <Button label="Saisir un relevé" variant="primary" onClick={() => setEditor('new')} />
+            </HStack>
           </HStack>
         </VStack>
       }
@@ -389,6 +404,17 @@ function MeterHistory({ meter, changed }: { meter: Meter; changed: () => void })
         />
       ) : (
         <Text>Aucun relevé pour ce compteur. Saisissez le premier index constaté.</Text>
+      )}
+      {editing && (
+        <MeterEditor
+          meter={meter}
+          close={() => setEditing(false)}
+          saved={() => {
+            setEditing(false)
+            setSuccess('Compteur modifié.')
+            changed()
+          }}
+        />
       )}
       {editor && (
         <ReadingEditor
