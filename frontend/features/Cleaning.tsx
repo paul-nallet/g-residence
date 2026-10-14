@@ -2,6 +2,7 @@ import type { Priority } from '../../src/domain/priority.ts'
 import { PriorityField, PriorityFilter, PriorityToken, type PriorityFilterValue } from './priority.tsx'
 import { useCallback, useState } from 'react'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
+import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList'
@@ -162,6 +163,13 @@ function PlanEditor({
           { value: 'none', label: 'Sans checklist' },
         ]}
       />
+      {!fallback && template === '' && lots.some((id) => !options.lots.find((item) => item.id === id)?.template_id) && (
+        <Banner
+          status="warning"
+          title="Aucune fiche par défaut"
+          description="Les lots sans fiche spécifique seront planifiés sans checklist. Choisissez une fiche ci-dessus ou définissez une fiche par défaut dans l’onglet Fiches."
+        />
+      )}
       {lots.length > 0 && (
         <Text color="secondary">
           {lots
@@ -1288,7 +1296,12 @@ export function CleaningTemplateDetail({ id }: { id: string }) {
           title={'Supprimer la fiche « ' + template.name + ' » ?'}
           description={
             mutation.error ||
-            'Les lots rattachés reprendront la fiche par défaut. Les tâches déjà planifiées conservent leur checklist.'
+            (template.is_default
+              ? 'C’est la fiche par défaut : les lots sans fiche spécifique seront planifiés sans checklist tant qu’aucune autre fiche n’est définie par défaut.'
+              : options.data.templates.some((item) => item.is_default)
+                ? 'Les lots rattachés reprendront la fiche par défaut.'
+                : 'Aucune fiche par défaut : les lots rattachés seront planifiés sans checklist.') +
+              ' Les tâches déjà planifiées conservent leur checklist.'
           }
           actionLabel="Supprimer la fiche"
           cancelLabel="Annuler"
