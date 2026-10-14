@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -293,13 +293,7 @@ function ThresholdEditor({
       error={mutation.error}
       submit={() =>
         void mutation.run(
-          () =>
-            call((client) =>
-              client.stock.update({
-                params: { id: item.id },
-                payload: { name: item.name, categories: item.categories, unit: item.unit, threshold },
-              }),
-            ),
+          () => call((client) => client.stock.threshold({ params: { id: item.id }, payload: { threshold } })),
           () => saved(threshold),
         )
       }
@@ -644,6 +638,7 @@ function ItemHistory({
           item={item}
           close={() => setDeleting(false)}
           removed={() => {
+            removedNotice = '« ' + item.name + ' » supprimé.'
             window.location.hash = '#stock'
           }}
         />
@@ -721,6 +716,8 @@ function ItemHistory({
   )
 }
 
+let removedNotice = ''
+
 export function Stock({ view }: { view: string }) {
   const [q, setQ] = useHashParam('q', ''),
     [category, setCategory] = useHashParam('categorie', ''),
@@ -733,8 +730,11 @@ export function Stock({ view }: { view: string }) {
     [deleting, setDeleting] = useState<StockItem | null>(null),
     [viewEditor, setViewEditor] = useState<StockView | 'new' | null>(null),
     [deletingView, setDeletingView] = useState<StockView | null>(null),
-    [success, setSuccess] = useState(''),
+    [success, setSuccess] = useState(removedNotice),
     [shownView, setShownView] = useState(view)
+  useEffect(() => {
+    removedNotice = ''
+  }, [])
   if (shownView !== view) {
     setShownView(view)
     setCategory('')

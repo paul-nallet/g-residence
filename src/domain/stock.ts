@@ -14,6 +14,7 @@ export const StockItemInput = Schema.Struct({
   unit: OptionalText(40),
   threshold: quantity,
 })
+export const StockThresholdInput = Schema.Struct({ threshold: quantity })
 export const StockItemCreate = Schema.Struct({ ...StockItemInput.fields, initial: quantity })
 export const StockCategory = Schema.Struct({ id: Schema.String, name: Schema.String })
 export type StockCategory = typeof StockCategory.Type

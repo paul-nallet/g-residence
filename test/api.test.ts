@@ -1021,12 +1021,21 @@ test('stocks : articles libres, mouvements, inventaire, stocks faibles et isolat
       [detail.name, detail.quantity, detail.threshold, detail.level, detail.categories],
       ['Couette 140', 11, 12, 'low', ['Literie']],
     )
+    assert.equal((await e.request('/stock/' + id + '/threshold', 'PATCH', { threshold: 5 })).status, 200)
+    assert.equal((await e.request('/stock/' + id + '/threshold', 'PATCH', { threshold: -1 })).status, 400)
+    assert.equal((await e.request('/stock/foreign-item/threshold', 'PATCH', { threshold: 5 })).status, 404)
+    const lowered = (await (await e.request('/stock/' + id)).json()) as typeof detail
+    assert.deepEqual(
+      [lowered.name, lowered.threshold, lowered.level, lowered.categories],
+      ['Couette 140', 5, 'ok', ['Literie']],
+    )
+    assert.equal((await e.request('/stock/' + id + '/threshold', 'PATCH', { threshold: 12 })).status, 200)
     list = (await (await e.request('/stock?category=' + hygiene)).json()) as Page
     assert.equal(list.total, 1)
     list = (await (await e.request('/stock?category=' + common)).json()) as Page
     assert.equal(list.total, 1)
     assert.equal((await e.request('/stock?level=autre')).status, 400)
-    assert.equal((e.sqlite.prepare('SELECT COUNT(*) AS n FROM stock_item_changes').get() as { n: number }).n, 4)
+    assert.equal((e.sqlite.prepare('SELECT COUNT(*) AS n FROM stock_item_changes').get() as { n: number }).n, 6)
     e.sqlite.exec('PRAGMA foreign_keys=OFF')
     e.sqlite
       .prepare(

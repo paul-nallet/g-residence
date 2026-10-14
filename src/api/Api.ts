@@ -66,6 +66,7 @@ import {
   StockItem,
   StockItemCreate,
   StockItemInput,
+  StockThresholdInput,
   StockLevelFilter,
   StockPage,
   StockViewInput,
@@ -418,6 +419,12 @@ export class StockGroup extends HttpApiGroup.make('stock')
     HttpApiEndpoint.patch('update', '/stock/:id', {
       params: id,
       payload: StockItemInput,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.patch('threshold', '/stock/:id/threshold', {
+      params: id,
+      payload: StockThresholdInput,
       success: Ok,
       error: errors,
     }),

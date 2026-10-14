@@ -27,6 +27,7 @@ export const StockLive = HttpApiBuilder.group(
       .handle('detail', ({ params }) => toHttp(stock.item(params.id)))
       .handle('create', ({ payload }) => toHttp(stock.create(payload)))
       .handle('update', ({ params, payload }) => toHttp(stock.update(params.id, payload)))
+      .handle('threshold', ({ params, payload }) => toHttp(stock.setThreshold(params.id, payload.threshold)))
       .handle('remove', ({ params }) => toHttp(stock.remove(params.id)))
       .handle('movements', ({ params, query }) => toHttp(stock.movements(params.id, query.page)))
       .handle('trend', ({ params, query }) => toHttp(stock.trend(params.id, query.year)))

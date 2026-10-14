@@ -297,6 +297,15 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
+  const setThreshold = Effect.fn('Stock.setThreshold')(function* (id: string, threshold: number) {
+    const { me, before } = yield* find(id)
+    yield* db.batch([
+      sql('UPDATE stock_items SET threshold=? WHERE id=? AND residence_id=?', threshold, id, me.residenceId),
+      itemChange(me, yield* now, id, before, { ...before, threshold }),
+    ])
+    return { ok: true }
+  })
+
   const remove = Effect.fn('Stock.remove')(function* (id: string) {
     const { me } = yield* find(id)
     yield* db.batch([
@@ -382,7 +391,7 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  return { list, saveView, removeView, item, create, update, remove, movements, trend, move }
+  return { list, saveView, removeView, item, create, update, setThreshold, remove, movements, trend, move }
 })
 
 export class Stock extends Context.Service<Stock, Effect.Success<typeof make>>()('gresidence/Stock') {
