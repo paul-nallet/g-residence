@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from 'effect'
 import {
   type Event,
   MAX_CALENDAR_DAYS,
+  OVERDUE_LIMIT,
   type Report,
   reportOf,
   residentName,
@@ -11,6 +12,7 @@ import {
 import { CurrentUser, manager } from '../domain/CurrentUser.ts'
 import { InvalidInput } from '../domain/errors.ts'
 import type { Inspection, Notice, Stay } from '../domain/stays.ts'
+import { currentDay } from '../domain/clock.ts'
 import { addDays, monday, parisDate, parisTime } from '../domain/rules.ts'
 import { sql, Sql } from './Database.ts'
 import { reportActivities } from './ReportActivities.ts'
@@ -27,6 +29,20 @@ type Intervention = {
   supplier: string
   place: string | null
 }
+
+type InspectionRow = Inspection & Resident & { lot_id: string }
+const inspectionEvent = (inspection: InspectionRow, hidden: boolean): Event => ({
+  id: inspection.id,
+  lotId: inspection.lot_id,
+  lotNumber: inspection.number,
+  kind: inspection.kind === 'entry' ? 'inspection_entry' : 'inspection_exit',
+  date: parisDate(inspection.starts_at),
+  time: parisTime(inspection.starts_at),
+  duration: inspection.duration,
+  status: inspection.status,
+  resident: residentName(hidden, inspection),
+  comment: hidden ? '' : inspection.comment,
+})
 
 const make = Effect.gen(function* () {
   const db = yield* Sql
@@ -50,7 +66,7 @@ const make = Effect.gen(function* () {
           to,
         ),
       ),
-      db.all<Inspection & Resident & { lot_id: string }>(
+      db.all<InspectionRow>(
         sql(
           `SELECT i.*,s.lot_id,s.first_name,s.last_name,l.number FROM inspections i JOIN stays s ON s.id=i.stay_id JOIN lots l ON l.id=s.lot_id WHERE i.residence_id=? AND s.cancelled=0 ${restriction} AND i.starts_at>=? AND i.starts_at<?`,
           ...scope,
@@ -84,23 +100,12 @@ const make = Effect.gen(function* () {
             ),
           ),
     ])
-    const events: Event[] = stays.flatMap((stay) => stayEvents(stay, from, to, hidden))
-    for (const inspection of inspections) {
-      const date = parisDate(inspection.starts_at)
-      if (date < from || date > to) continue
-      events.push({
-        id: inspection.id,
-        lotId: inspection.lot_id,
-        lotNumber: inspection.number,
-        kind: inspection.kind === 'entry' ? 'inspection_entry' : 'inspection_exit',
-        date,
-        time: parisTime(inspection.starts_at),
-        duration: inspection.duration,
-        status: inspection.status,
-        resident: residentName(hidden, inspection),
-        comment: hidden ? '' : inspection.comment,
-      })
-    }
+    const events: Event[] = [
+      ...stays.flatMap((stay) => stayEvents(stay, from, to, hidden)),
+      ...inspections
+        .map((inspection) => inspectionEvent(inspection, hidden))
+        .filter((e) => e.date >= from && e.date <= to),
+    ]
     for (const intervention of interventions) {
       const date = parisDate(intervention.starts_at)
       if (date < from || date > to) continue
@@ -137,6 +142,40 @@ const make = Effect.gen(function* () {
         place: visit.building,
       })
     return sortEvents(events)
+  })
+
+  const overdue = Effect.fn('Agenda.overdue')(function* () {
+    const me = yield* CurrentUser
+    const day = yield* currentDay
+    const hidden = me.role === 'cleaner'
+    const [stays, inspections] = yield* Effect.all([
+      db.all<Stay & { number: string }>(
+        sql(
+          `SELECT s.*,l.number FROM stays s JOIN lots l ON l.id=s.lot_id WHERE s.residence_id=? AND s.cancelled=0
+          AND ((s.actual_start IS NULL AND s.planned_start<?) OR (s.actual_end IS NULL AND s.planned_end<?))
+          ORDER BY min(CASE WHEN s.actual_start IS NULL THEN s.planned_start ELSE '9999' END,
+            CASE WHEN s.actual_end IS NULL THEN s.planned_end ELSE '9999' END) LIMIT ?`,
+          me.residenceId,
+          day,
+          day,
+          OVERDUE_LIMIT,
+        ),
+      ),
+      db.all<InspectionRow>(
+        sql(
+          `SELECT i.*,s.lot_id,s.first_name,s.last_name,l.number FROM inspections i JOIN stays s ON s.id=i.stay_id JOIN lots l ON l.id=s.lot_id
+          WHERE i.residence_id=? AND s.cancelled=0 AND i.status='planned' AND i.starts_at<? ORDER BY i.starts_at LIMIT ?`,
+          me.residenceId,
+          day + 'T00:00:00.000Z',
+          OVERDUE_LIMIT,
+        ),
+      ),
+    ])
+    const events = [
+      ...stays.flatMap((stay) => stayEvents(stay, '0000-01-01', addDays(day, -1), hidden)),
+      ...inspections.map((inspection) => inspectionEvent(inspection, hidden)),
+    ].filter((event) => event.status === 'planned' && event.date < day)
+    return sortEvents(events).slice(0, OVERDUE_LIMIT)
   })
 
   const report = Effect.fn('Agenda.report')(function* (date: string, page?: number) {
@@ -217,7 +256,7 @@ const make = Effect.gen(function* () {
     return reportOf(from, to, rows, page)
   })
 
-  return { calendar, report }
+  return { calendar, overdue, report }
 })
 
 export class Agenda extends Context.Service<Agenda, Effect.Success<typeof make>>()('gresidence/Agenda') {

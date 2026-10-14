@@ -99,7 +99,9 @@ export const CalendarLive = HttpApiBuilder.group(
   'calendar',
   Effect.fn(function* (handlers) {
     const agenda = yield* Agenda
-    return handlers.handle('list', ({ query }) => agendaHttp(agenda.calendar(query.from, query.to)))
+    return handlers
+      .handle('list', ({ query }) => agendaHttp(agenda.calendar(query.from, query.to)))
+      .handle('overdue', () => agendaHttp(agenda.overdue()))
   }),
 )
 

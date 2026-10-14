@@ -153,6 +153,20 @@ test('invitations, isolation ménage et révocation du compte', async () => {
     assert.doesNotMatch(await detail.text(), /SecretPrénom|SecretNom|SecretCommentaire/)
     const events = await e.request('/calendar?from=2026-01-01&to=2026-01-07', 'GET', undefined, cleaner)
     assert.doesNotMatch(await events.text(), /SecretPrénom|SecretNom|SecretCommentaire/)
+    const overdue = await e.request('/calendar/overdue', 'GET', undefined, cleaner)
+    const overdueText = await overdue.text()
+    assert.doesNotMatch(overdueText, /SecretPrénom|SecretNom|SecretCommentaire/)
+    assert.deepEqual(
+      (JSON.parse(overdueText) as { kind: string; date: string; lotId: string }[]).map((event) => [
+        event.kind,
+        event.date,
+        event.lotId,
+      ]),
+      [
+        ['entry', '2026-01-01', lotId],
+        ['inspection_entry', '2026-01-02', lotId],
+      ],
+    )
     for (const path of ['/team', '/reports/weekly?date=2026-01-01'])
       assert.equal((await e.request(path, 'GET', undefined, cleaner)).status, 403)
     assert.equal(

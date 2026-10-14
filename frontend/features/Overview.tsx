@@ -24,13 +24,13 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import type { Me } from '../../src/domain/accounts.ts'
-import type { Event } from '../../src/domain/agenda.ts'
+import { type Event, OVERDUE_LIMIT } from '../../src/domain/agenda.ts'
 import type { CleaningTask } from '../../src/domain/cleaning.ts'
 import { addDays, today } from '../../src/domain/rules.ts'
 import { call } from '../lib/api.ts'
 import { useQuery } from '../lib/data.ts'
 import { CommentIcon, taskComments } from './Cleaning.tsx'
-import { dateLabel, eventHref, eventSubject, kindLabels, Loading, StateToken } from './shared.tsx'
+import { dateLabel, eventHref, EventStateToken, eventSubject, kindLabels, Loading, StateToken } from './shared.tsx'
 
 type Tone = 'error' | 'warning' | 'info'
 type Action = {
@@ -40,7 +40,7 @@ type Action = {
   label: string
   description: string
   done: string
-  href: string
+  href?: string
   count: number
 }
 
@@ -74,11 +74,12 @@ export function Overview({ me }: { me: Me }) {
     manager = me.role !== 'cleaner',
     [showDone, setShowDone] = useState(readShowDone),
     load = useCallback(async () => {
-      const [lots, occupied, events, cleaning, late, stock, meters, metersPending, issues, works, revenue] =
+      const [lots, occupied, events, overdue, cleaning, late, stock, meters, metersPending, issues, works, revenue] =
         await Promise.all([
           call((client) => client.lots.list({ query: {} })),
           call((client) => client.lots.list({ query: { state: 'occupied' } })),
-          call((client) => client.calendar.list({ query: { from: addDays(date, -30), to: addDays(date, 6) } })),
+          call((client) => client.calendar.list({ query: { from: date, to: addDays(date, 6) } })),
+          manager ? call((client) => client.calendar.overdue()) : [],
           call((client) => client.cleaning.tasks({ query: { from: date, to: date } })),
           call((client) => client.cleaning.tasks({ query: { from: addDays(date, -7), to: addDays(date, -1) } })),
           manager ? call((client) => client.stock.list({ query: { level: 'alert' } })) : null,
@@ -88,7 +89,7 @@ export function Overview({ me }: { me: Me }) {
           manager ? call((client) => client.technical.works({ query: { status: 'active' } })) : null,
           manager ? call((client) => client.revenue.list({ query: { month } })) : null,
         ])
-      return { lots, occupied, events, cleaning, late, stock, meters, metersPending, issues, works, revenue }
+      return { lots, occupied, events, overdue, cleaning, late, stock, meters, metersPending, issues, works, revenue }
     }, [date, month, manager]),
     result = useQuery('overview:' + date, load)
 
@@ -108,9 +109,7 @@ export function Overview({ me }: { me: Me }) {
       ) : (
         (() => {
           const data = result.data,
-            movements = data.events.filter((event) => movementKinds.includes(event.kind)),
-            past = movements.filter((event) => event.date < date),
-            overdue = past.filter((event) => event.status === 'planned'),
+            overdue = data.overdue,
             todayEvents = data.events.filter((event) => event.date === date),
             upcoming = data.events.filter((event) => event.date > date && event.status !== 'cancelled'),
             upcomingMovements = upcoming.filter((event) => movementKinds.includes(event.kind)),
@@ -131,11 +130,9 @@ export function Overview({ me }: { me: Me }) {
                       tone: 'error',
                       icon: CalendarClock,
                       label: 'Mouvements à confirmer',
-                      description: 'Entrées, sorties ou états des lieux passés, toujours marqués comme prévus.',
-                      done: past.length
-                        ? `${plural(past.length, 'mouvement confirmé', 'mouvements confirmés')} sur les trente derniers jours.`
-                        : 'Aucun mouvement passé à confirmer.',
-                      href: overdue[0] ? '#calendar?vue=week&date=' + overdue[0].date : '#calendar',
+                      description:
+                        'Entrées, sorties ou états des lieux passés, toujours marqués comme prévus : voir la liste ci-dessous.',
+                      done: 'Aucun mouvement passé à confirmer.',
                       count: overdue.length,
                     } satisfies Action,
                   ]
@@ -275,6 +272,25 @@ export function Overview({ me }: { me: Me }) {
                 )}
               </List>
 
+              {overdue.length > 0 && (
+                <List
+                  hasDividers
+                  header={
+                    <HStack gap={2} vAlign="center">
+                      <Heading level={2}>Mouvements en retard</Heading>
+                      <Badge
+                        variant="error"
+                        label={overdue.length >= OVERDUE_LIMIT ? OVERDUE_LIMIT + '+' : overdue.length}
+                      />
+                    </HStack>
+                  }
+                >
+                  {overdue.map((event) => (
+                    <EventItem key={event.id} event={event} withDate />
+                  ))}
+                </List>
+              )}
+
               <Grid columns={{ minWidth: 140, max: 4 }} gap={3}>
                 <Metric
                   label="Occupation"
@@ -387,7 +403,7 @@ function EventItem({ event, withDate = false }: { event: Event; withDate?: boole
         .filter(Boolean)
         .join(' · ')}
       href={eventHref(event)}
-      endContent={<StateToken state={event.status} />}
+      endContent={<EventStateToken event={event} />}
     />
   )
 }

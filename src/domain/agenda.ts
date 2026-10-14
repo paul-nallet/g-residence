@@ -40,6 +40,7 @@ export const Report = Schema.Struct({
 export type Report = typeof Report.Type
 
 export const MAX_CALENDAR_DAYS = 62
+export const OVERDUE_LIMIT = 50
 
 type Resident = { first_name: string; last_name: string }
 type StayEvents = Resident & {

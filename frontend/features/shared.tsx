@@ -58,6 +58,10 @@ export function StateToken({ state }: { state: string }) {
     />
   )
 }
+export const isOverdue = (event: Event) => event.status === 'planned' && event.date < today()
+export function EventStateToken({ event }: { event: Event }) {
+  return isOverdue(event) ? <Token label="En retard" color="red" size="sm" /> : <StateToken state={event.status} />
+}
 export function DateField({
   label,
   value,
@@ -162,7 +166,7 @@ export function EventList({ events, title = 'Événements' }: { events: readonly
             label={`${event.time ? event.time + ' · ' : ''}${eventSubject(event)} · ${kindLabels[event.kind]}`}
             href={eventHref(event)}
             description={`${dateLabel(event.date)}${event.duration ? ' · ' + event.duration + ' min' : ''}${event.resident ? ' · ' + event.resident : ''}${event.comment ? ' · ' + event.comment : ''}`}
-            endContent={<StateToken state={event.status} />}
+            endContent={<EventStateToken event={event} />}
           />
         ))
       ) : (

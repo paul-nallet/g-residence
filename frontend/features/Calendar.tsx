@@ -19,7 +19,16 @@ import { addDays, monday, today, monthLast, shiftMonth } from '../../src/domain/
 import { call } from '../lib/api.ts'
 import { useQuery } from '../lib/data.ts'
 import { useHashParam } from '../lib/hashParams.ts'
-import { DateField, dateLabel, EventList, eventHref, eventSubject, Loading, StateToken } from './shared.tsx'
+import {
+  DateField,
+  dateLabel,
+  EventList,
+  eventHref,
+  EventStateToken,
+  eventSubject,
+  isOverdue,
+  Loading,
+} from './shared.tsx'
 
 const format = (date: string, options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', ...options }).format(new Date(date))
@@ -148,7 +157,7 @@ function DayCell({
                   <VStack gap={1}>
                     <HStack gap={1} wrap="wrap">
                       <Token label={kindTokens[event.kind].label} color={kindTokens[event.kind].color} size="sm" />
-                      {event.status !== 'planned' && <StateToken state={event.status} />}
+                      {(event.status !== 'planned' || isOverdue(event)) && <EventStateToken event={event} />}
                     </HStack>
                     {!compact && event.resident && (
                       <Text type="supporting" maxLines={2}>

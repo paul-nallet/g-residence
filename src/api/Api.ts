@@ -269,6 +269,12 @@ export class CalendarGroup extends HttpApiGroup.make('calendar')
       error: errors,
     }),
   )
+  .add(
+    HttpApiEndpoint.get('overdue', '/calendar/overdue', {
+      success: Schema.Array(Event),
+      error: errors,
+    }),
+  )
   .middleware(Authorization) {}
 export class ReportsGroup extends HttpApiGroup.make('reports')
   .add(
