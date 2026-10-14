@@ -17,7 +17,7 @@ La V1 livre comptes, lots, séjours, préavis, états des lieux, calendrier, bil
 - `rtk npm run check` : build, typecheck, oxlint, oxfmt `--check`, tests, `wrangler deploy --dry-run`.
 - `rtk npm test` ; un seul fichier : `rtk node --test test/api.test.ts` ; un seul test : ajouter `--test-name-pattern "<nom>"`.
 - `rtk npm run format` pour corriger le format ; `rtk npm run types` régénère `worker-configuration.d.ts` après un changement de `wrangler.jsonc`.
-- Validation manuelle sur base séparée, sans toucher la base principale : `rtk proxy npx wrangler dev --port 8791 --persist-to .wrangler/v1-validation`.
+- Validation manuelle sur base séparée, sans toucher la base principale : `rtk proxy npx wrangler dev --port 8791 --persist-to .wrangler/v1-validation`. Dans le navigateur intégré, réutiliser l'unique entrée `validation` de `.claude/launch.json` ; ne jamais y ajouter d'entrée ni créer d'autre dossier `.wrangler/*-validation`.
 
 ## Architecture
 

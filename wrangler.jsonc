@@ -18,13 +18,12 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "gresidence-local",
-      "database_id": "00000000-0000-0000-0000-000000000001",
-      "migrations_dir": "migrations",
+      "database_name": "gresidence-production",
+      "database_id": "278fcd56-6d0c-4bbb-97e4-302323bbffc2",
     },
   ],
   "vars": {
-    "ADMIN_EMAIL": "",
+    "ADMIN_EMAIL": "nalletpaul@icloud.com",
     "AI_PROVIDER": "",
     "AI_MODEL": "",
   },
