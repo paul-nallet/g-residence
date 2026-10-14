@@ -91,6 +91,7 @@ export const sortEvents = (events: Event[]) =>
   events.sort((a, b) => (a.date + a.time + a.lotNumber + a.id).localeCompare(b.date + b.time + b.lotNumber + b.id))
 
 export const REPORT_PAGE_SIZE = 20
+const civil = (date: string) => date.split('-').toReversed().join('/')
 
 export const reportOf = (from: string, to: string, rows: ReportRow[], page?: number): Report => {
   rows.sort((a, b) =>
@@ -102,9 +103,10 @@ export const reportOf = (from: string, to: string, rows: ReportRow[], page?: num
     rows: page === undefined ? rows : rows.slice((page - 1) * REPORT_PAGE_SIZE, page * REPORT_PAGE_SIZE),
     total: rows.length,
     tsv: toTSV([
+      [`Bilan du ${civil(from)} au ${civil(to)}`],
       ['Date', 'Module', 'Lot', 'Objet / lieu', 'Type d’événement', 'Intervenant', 'Nom', 'Prénom', 'Commentaire'],
       ...rows.map((row) => [
-        row.date.split('-').toReversed().join('/'),
+        civil(row.date),
         row.module,
         row.lot,
         row.subject,

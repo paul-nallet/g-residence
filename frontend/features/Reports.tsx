@@ -6,18 +6,27 @@ import { HStack, VStack } from '@astryxdesign/core/Stack'
 import { Table, proportional, useTablePagination } from '@astryxdesign/core/Table'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
-import { today } from '../../src/domain/rules.ts'
+import { addDays, monday, today } from '../../src/domain/rules.ts'
 import { REPORT_PAGE_SIZE, type ReportRow } from '../../src/domain/agenda.ts'
 import { copyText } from '../lib/clipboard.ts'
 import { call } from '../lib/api.ts'
 import { useQuery } from '../lib/data.ts'
-import { DateField, dateLabel, Loading } from './shared.tsx'
+import { useHashPage, useHashParam } from '../lib/hashParams.ts'
+import { DateField, dateLabel, Loading, PeriodNav } from './shared.tsx'
 
 export function Reports() {
-  const [date, setDate] = useState(today()),
-    [page, setPage] = useState(1),
+  const current = monday(today()),
+    [week, setWeek] = useHashParam('semaine', current),
+    [page, setPage] = useHashPage(),
     [copied, setCopied] = useState(''),
-    [manual, setManual] = useState(false)
+    [manual, setManual] = useState(false),
+    date = monday(week)
+  const show = (day: string) => {
+    setWeek(monday(day))
+    setPage(1)
+    setCopied('')
+    setManual(false)
+  }
   const load = useCallback(() => call((client) => client.reports.weekly({ query: { date, page } })), [date, page]),
     result = useQuery(`report:${date}:${page}`, load)
   const pagination = useTablePagination<ReportRow>({
@@ -51,16 +60,20 @@ export function Reports() {
       }
     >
       <HStack gap={3} wrap="wrap" vAlign="end">
+        <PeriodNav
+          label="Navigation par semaine"
+          previous="Précédente"
+          current="Cette semaine"
+          next="Suivante"
+          onPrevious={() => show(addDays(date, -7))}
+          onCurrent={() => show(current)}
+          onNext={() => show(addDays(date, 7))}
+        />
         <DateField
           label="Une date de la semaine"
           value={date}
           onChange={(value) => {
-            if (value) {
-              setDate(value)
-              setPage(1)
-              setCopied('')
-              setManual(false)
-            }
+            if (value) show(value)
           }}
         />
         <Button

@@ -182,10 +182,18 @@ const make = Effect.gen(function* () {
     const me = yield* manager
     const from = monday(date),
       to = addDays(from, 6)
+    const subject = `'Lot ' || l.number || COALESCE(' · ' || b.name,'')`
+    const actor = (id: string, preferred: string) => `(SELECT u.name FROM history h JOIN users u ON u.id=h.actor_id
+      WHERE h.residence_id=l.residence_id AND h.lot_id=l.id AND json_extract(h.after_json,'$.id')=${id}
+      ORDER BY h.action='${preferred}' DESC,h.created_at DESC LIMIT 1)`
+    const lots = 'JOIN lots l ON l.id=s.lot_id LEFT JOIN buildings b ON b.id=l.building_id'
+    type Movement = { subject: string; actor: string | null }
     const [stays, notices, inspections] = yield* Effect.all([
-      db.all<Stay & { number: string }>(
+      db.all<Stay & Movement & { number: string; exit_actor: string | null }>(
         sql(
-          'SELECT s.*,l.number FROM stays s JOIN lots l ON l.id=s.lot_id WHERE s.residence_id=? AND s.cancelled=0 AND (s.actual_start BETWEEN ? AND ? OR s.actual_end BETWEEN ? AND ?)',
+          `SELECT s.*,l.number,${subject} AS subject,${actor('s.id', 'Entrée réelle confirmée ou corrigée')} AS actor,
+          ${actor('s.id', 'Sortie réelle confirmée ou corrigée')} AS exit_actor
+          FROM stays s ${lots} WHERE s.residence_id=? AND s.cancelled=0 AND (s.actual_start BETWEEN ? AND ? OR s.actual_end BETWEEN ? AND ?)`,
           me.residenceId,
           from,
           to,
@@ -193,17 +201,19 @@ const make = Effect.gen(function* () {
           to,
         ),
       ),
-      db.all<Notice & Resident>(
+      db.all<Notice & Resident & Movement>(
         sql(
-          'SELECT n.*,l.number,s.first_name,s.last_name FROM notices n JOIN stays s ON s.id=n.stay_id JOIN lots l ON l.id=s.lot_id WHERE n.residence_id=? AND n.withdrawn=0 AND s.cancelled=0 AND n.received_on BETWEEN ? AND ?',
+          `SELECT n.*,l.number,s.first_name,s.last_name,${subject} AS subject,${actor('n.id', 'Préavis reçu')} AS actor
+          FROM notices n JOIN stays s ON s.id=n.stay_id ${lots} WHERE n.residence_id=? AND n.withdrawn=0 AND s.cancelled=0 AND n.received_on BETWEEN ? AND ?`,
           me.residenceId,
           from,
           to,
         ),
       ),
-      db.all<Inspection & Resident>(
+      db.all<Inspection & Resident & Movement>(
         sql(
-          "SELECT i.*,l.number,s.first_name,s.last_name FROM inspections i JOIN stays s ON s.id=i.stay_id JOIN lots l ON l.id=s.lot_id WHERE i.residence_id=? AND i.status='done' AND s.cancelled=0 AND i.completed_on BETWEEN ? AND ?",
+          `SELECT i.*,l.number,s.first_name,s.last_name,${subject} AS subject,${actor('i.id', 'État des lieux réalisé')} AS actor
+          FROM inspections i JOIN stays s ON s.id=i.stay_id ${lots} WHERE i.residence_id=? AND i.status='done' AND s.cancelled=0 AND i.completed_on BETWEEN ? AND ?`,
           me.residenceId,
           from,
           to,
@@ -215,24 +225,25 @@ const make = Effect.gen(function* () {
       ...stays.flatMap((stay) =>
         [
           ...(within(stay.actual_start)
-            ? [{ date: stay.actual_start, kind: 'Entrée réelle', lot: stay.number, comment: '' }]
+            ? [{ date: stay.actual_start, kind: 'Entrée réelle', actor: stay.actor ?? '' }]
             : []),
           ...(within(stay.actual_end)
-            ? [{ date: stay.actual_end, kind: 'Sortie réelle', lot: stay.number, comment: '' }]
+            ? [{ date: stay.actual_end, kind: 'Sortie réelle', actor: stay.exit_actor ?? '' }]
             : []),
         ].map((row) => ({
           ...row,
           module: 'Mouvements',
-          subject: '',
-          actor: '',
+          lot: stay.number,
+          subject: stay.subject,
+          comment: '',
           lastName: stay.last_name,
           firstName: stay.first_name,
         })),
       ),
       ...notices.map((notice) => ({
         module: 'Mouvements',
-        subject: '',
-        actor: '',
+        subject: notice.subject,
+        actor: notice.actor ?? '',
         date: notice.received_on,
         lot: notice.number,
         kind: 'Préavis reçu',
@@ -242,8 +253,8 @@ const make = Effect.gen(function* () {
       })),
       ...inspections.map((inspection) => ({
         module: 'Mouvements',
-        subject: '',
-        actor: '',
+        subject: inspection.subject,
+        actor: inspection.actor ?? '',
         date: inspection.completed_on!,
         lot: inspection.number,
         kind: inspection.kind === 'entry' ? 'État des lieux d’entrée réalisé' : 'État des lieux de sortie réalisé',

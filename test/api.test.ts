@@ -301,8 +301,14 @@ test('bilan réalisé, corrections, annulation et limites de semaine', async () 
     assert.equal(before.to, '2026-01-11')
     assert.equal(before.rows.length, 0)
     await e.request('/inspections/' + iid, 'PATCH', { ...planned, status: 'done', completed_on: '2026-01-06' })
-    const done = (await (await e.request('/reports/weekly?date=2026-01-07')).json()) as { rows: unknown[]; tsv: string }
+    const done = (await (await e.request('/reports/weekly?date=2026-01-07')).json()) as {
+      rows: { actor: string; subject: string }[]
+      tsv: string
+    }
     assert.equal(done.rows.length, 1)
+    assert.equal(done.rows[0]!.actor, 'Gestionnaire')
+    assert.match(done.rows[0]!.subject, /^Lot 101 · /)
+    assert.match(done.tsv, /^Bilan du 05\/01\/2026 au 11\/01\/2026\r\nDate\t/)
     assert.match(done.tsv, /'=FORMULE/)
     assert.match(done.tsv, /ligne seconde colonne/)
     await e.request('/inspections/' + iid, 'PATCH', { ...planned, status: 'cancelled' })
@@ -437,7 +443,7 @@ test('bilan de tous les modules, dates Paris, pagination et export complet', asy
     assert.match(full.rows.find((row) => row.module === 'Relevés')!.comment, /123.5 m³/)
     assert.match(full.rows.find((row) => row.kind === 'Chiffre d’affaires corrigé')!.comment, /2026-02 · 20.00 € HT/)
     assert.equal(report.tsv, full.tsv)
-    assert.equal(report.tsv.split('\r\n').length, report.total + 1)
+    assert.equal(report.tsv.split('\r\n').length, report.total + 2)
     assert.match(report.tsv, /'=Idée avec tabulation/)
     assert.doesNotMatch(report.tsv, /Semaine suivante/)
     const second = (await (await e.request('/reports/weekly?date=2026-03-25&page=2')).json()) as Report
