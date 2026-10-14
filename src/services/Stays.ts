@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
       if (before.actual_start) return yield* new StayStarted()
       yield* write([
         sql('UPDATE stays SET cancelled=1 WHERE id=? AND residence_id=?', id, me.residenceId),
-        sql("UPDATE inspections SET status='cancelled',completed_on=NULL WHERE stay_id=?", id),
+        sql("UPDATE inspections SET status='cancelled' WHERE stay_id=? AND status='planned'", id),
         sql('UPDATE notices SET withdrawn=1 WHERE stay_id=?', id),
         auditStatement(me, at, before.lot_id, 'Séjour annulé', before, { id, cancelled: true }),
       ])
@@ -143,6 +143,10 @@ const make = Effect.gen(function* () {
       return yield* new InvalidInput({ message: 'Confirmez l’entrée avant la sortie et vérifiez les dates.' })
     if (input.action === 'entry' && before.actual_end && input.date > before.actual_end)
       return yield* new InvalidInput({ message: 'L’entrée doit précéder la sortie réelle.' })
+    if (input.action === 'entry' && !before.actual_end && before.planned_end && input.date >= before.planned_end)
+      return yield* new InvalidInput({
+        message: 'Le départ prévu précède cette entrée : corrigez d’abord les dates du séjour.',
+      })
     yield* write([
       sql(
         `UPDATE stays SET ${input.action === 'entry' ? 'actual_start' : 'actual_end'}=? WHERE id=? AND residence_id=?`,

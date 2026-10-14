@@ -12,14 +12,14 @@ import { call } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { dateLabel, Editor, Feedback, Loading, RoleField, roleLabels } from './shared.tsx'
 
-function InviteEditor({ close, saved }: { close: () => void; saved: (token: string) => void }) {
+function InviteEditor({ close, saved }: { close: () => void; saved: (token: string, email: string) => void }) {
   const [email, setEmail] = useState(''),
     [role, setRole] = useState<Role>('manager'),
     mutation = useMutation()
   const submit = () =>
     mutation.run(async () => {
       const result = await call((client) => client.team.invite({ payload: { email, role } }))
-      saved(result.token)
+      saved(result.token, email.trim().toLowerCase())
     })
   return (
     <Editor
@@ -79,9 +79,10 @@ export function Team({ me }: { me: Me }) {
     mutation = useMutation()
   const [invite, setInvite] = useState(false),
     [link, setLink] = useState(''),
+    [linkEmail, setLinkEmail] = useState(''),
     [copy, setCopy] = useState(''),
     [member, setMember] = useState<{ id: string; name: string; role: Role; disabled: number } | null>(null),
-    [revoke, setRevoke] = useState<string | null>(null)
+    [revoke, setRevoke] = useState<{ id: string; email: string } | null>(null)
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(link)
@@ -148,7 +149,7 @@ export function Team({ me }: { me: Me }) {
                   key={item.id}
                   label={item.email}
                   description={roleLabels[item.role] + ' · expire le ' + dateLabel(item.expires_at.slice(0, 10))}
-                  endContent={<Button label="Révoquer" onClick={() => setRevoke(item.id)} />}
+                  endContent={<Button label="Révoquer" onClick={() => setRevoke({ id: item.id, email: item.email })} />}
                 />
               ))
             ) : (
@@ -160,8 +161,9 @@ export function Team({ me }: { me: Me }) {
       {invite && (
         <InviteEditor
           close={() => setInvite(false)}
-          saved={(token) => {
+          saved={(token, email) => {
             setLink(window.location.origin + '/?invite=' + encodeURIComponent(token))
+            setLinkEmail(email)
             setCopy('')
             setInvite(false)
             void result.refresh()
@@ -187,10 +189,10 @@ export function Team({ me }: { me: Me }) {
           label="Révoquer"
           submit={() =>
             void mutation.run(
-              () => call((client) => client.team.revoke({ params: { id: revoke } })),
+              () => call((client) => client.team.revoke({ params: { id: revoke.id } })),
               () => {
+                if (revoke.email === linkEmail) setLink('')
                 setRevoke(null)
-                setLink('')
                 void result.refresh()
               },
             )

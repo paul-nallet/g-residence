@@ -119,3 +119,4 @@ export const VisitPage = Schema.Struct({ items: Schema.Array(VisitSummary), tota
 export const VisitTemplatePage = Schema.Struct({ items: Schema.Array(VisitTemplateSummary), total: Schema.Number })
 export class VisitNotFound extends Schema.TaggedError<VisitNotFound>()('VisitNotFound', {}) {}
 export class VisitConflict extends Schema.TaggedError<VisitConflict>()('VisitConflict', {}) {}
+export class VisitAlreadyPlanned extends Schema.TaggedError<VisitAlreadyPlanned>()('VisitAlreadyPlanned', {}) {}

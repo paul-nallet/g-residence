@@ -569,6 +569,11 @@ export function TechnicalVisit({ id }: { id: string }) {
     editable = visit.status === 'planned'
   const ready = visit.points.every((p) => p.state !== 'pending')
   const zones = [...new Set(visit.points.map((p) => p.zone))]
+  const openAction = (next: 'finish' | 'cancel') => {
+    setDay(today())
+    setReport('')
+    setAction(next)
+  }
   const refresh = () => {
     setPoint(null)
     setAction(null)
@@ -590,7 +595,7 @@ export function TechnicalVisit({ id }: { id: string }) {
             pointStateLabels[p.state],
             p.note,
             p.actor,
-            p.issue_id ?? '',
+            p.issue_id ? 'Créé' : '',
           ]),
           [
             visit.name,
@@ -624,12 +629,12 @@ export function TechnicalVisit({ id }: { id: string }) {
             {editable ? (
               <>
                 <Button label="Reporter" onClick={() => setPlan(true)} />
-                <Button label="Annuler la visite" onClick={() => setAction('cancel')} />
+                <Button label="Annuler la visite" onClick={() => openAction('cancel')} />
                 <Button
                   label="Terminer la visite"
                   variant="primary"
                   isDisabled={!ready || mutation.busy}
-                  onClick={() => setAction('finish')}
+                  onClick={() => openAction('finish')}
                 />
               </>
             ) : (
@@ -672,7 +677,7 @@ export function TechnicalVisit({ id }: { id: string }) {
                       {editable ? (
                         <Button label="Saisir le constat" size="sm" onClick={() => setPoint(p)} />
                       ) : p.issue_id ? (
-                        <Link href={'#technical/signalements?q=' + encodeURIComponent(p.label)}>
+                        <Link href={'#technical/signalements?statut=all&q=' + encodeURIComponent(p.label)}>
                           Voir le signalement
                         </Link>
                       ) : p.state === 'issue' && visit.status === 'done' ? (

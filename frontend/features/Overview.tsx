@@ -57,6 +57,7 @@ const writeShowDone = (value: boolean) => {
     window.localStorage.setItem(SHOW_DONE, value ? '1' : '0')
   } catch {}
 }
+const movementKinds: readonly Event['kind'][] = ['entry', 'exit', 'inspection_entry', 'inspection_exit']
 const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
 const longDate = (date: string) =>
   new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(
@@ -107,31 +108,38 @@ export function Overview({ me }: { me: Me }) {
       ) : (
         (() => {
           const data = result.data,
-            past = data.events.filter((event) => event.date < date && event.kind !== 'intervention'),
+            movements = data.events.filter((event) => movementKinds.includes(event.kind)),
+            past = movements.filter((event) => event.date < date),
             overdue = past.filter((event) => event.status === 'planned'),
             todayEvents = data.events.filter((event) => event.date === date),
             upcoming = data.events.filter((event) => event.date > date && event.status !== 'cancelled'),
+            upcomingMovements = upcoming.filter((event) => movementKinds.includes(event.kind)),
             lateCleaning = data.late.filter((task) => task.status === 'planned'),
             cleaningActive = data.cleaning.filter((task) => task.status !== 'cancelled'),
             cleaningLeft = cleaningActive.filter((task) => task.status === 'planned'),
             stockOut = data.stock?.items.filter((item) => item.level === 'out').length ?? 0,
+            stockLow = (data.stock?.items.length ?? 0) - stockOut,
             meterCount = data.meters?.total ?? 0,
             meterLeft = data.metersPending?.total ?? 0,
             sourceCount = data.revenue?.total ?? 0,
             sourceLeft = data.revenue?.pending ?? 0,
             candidates: Action[] = [
-              {
-                key: 'overdue',
-                tone: 'error',
-                icon: CalendarClock,
-                label: 'Mouvements à confirmer',
-                description: 'Entrées, sorties ou états des lieux passés, toujours marqués comme prévus.',
-                done: past.length
-                  ? `${plural(past.length, 'mouvement confirmé', 'mouvements confirmés')} sur les trente derniers jours.`
-                  : 'Aucun mouvement passé à confirmer.',
-                href: '#calendar',
-                count: overdue.length,
-              },
+              ...(manager
+                ? [
+                    {
+                      key: 'overdue',
+                      tone: 'error',
+                      icon: CalendarClock,
+                      label: 'Mouvements à confirmer',
+                      description: 'Entrées, sorties ou états des lieux passés, toujours marqués comme prévus.',
+                      done: past.length
+                        ? `${plural(past.length, 'mouvement confirmé', 'mouvements confirmés')} sur les trente derniers jours.`
+                        : 'Aucun mouvement passé à confirmer.',
+                      href: overdue[0] ? '#calendar?vue=week&date=' + overdue[0].date : '#calendar',
+                      count: overdue.length,
+                    } satisfies Action,
+                  ]
+                : []),
               {
                 key: 'late-cleaning',
                 tone: 'error',
@@ -173,9 +181,13 @@ export function Overview({ me }: { me: Me }) {
                       tone: stockOut ? 'error' : 'warning',
                       icon: Package,
                       label: 'Stocks à réapprovisionner',
-                      description: stockOut
-                        ? `${plural(stockOut, 'article', 'articles')} en rupture.`
-                        : 'Quantités sous le seuil d’alerte.',
+                      description:
+                        [
+                          stockOut ? `${plural(stockOut, 'article', 'articles')} en rupture` : '',
+                          stockLow ? `${plural(stockLow, 'article', 'articles')} sous le seuil d’alerte` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(', ') + '.',
                       done: 'Toutes les quantités dépassent leur seuil d’alerte.',
                       href: '#stock',
                       count: data.stock?.total ?? 0,
@@ -272,7 +284,7 @@ export function Overview({ me }: { me: Me }) {
                 />
                 <Metric
                   label="Mouvements à venir"
-                  value={String(upcoming.filter((event) => event.kind !== 'intervention').length)}
+                  value={String(upcomingMovements.length)}
                   detail="Entrées, sorties et états des lieux sur sept jours"
                   href="#calendar"
                 />

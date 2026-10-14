@@ -6,6 +6,7 @@ import { InvalidInput } from '../domain/errors.ts'
 import { parseLocation } from '../domain/technical.ts'
 import {
   nextVisitDate,
+  VisitAlreadyPlanned,
   VisitConflict,
   VisitNotFound,
   VisitPointInput,
@@ -230,6 +231,11 @@ const make = Effect.gen(function* () {
         input.name,
       ),
     )
+    if (
+      previous &&
+      (yield* db.first(sql("SELECT id FROM technical_visits WHERE template_id=? AND status='planned'", previous.id)))
+    )
+      return yield* new VisitAlreadyPlanned()
     const id = crypto.randomUUID(),
       templateId = previous?.id ?? crypto.randomUUID(),
       at = yield* now
@@ -285,6 +291,8 @@ const make = Effect.gen(function* () {
       model = yield* template(input.template_id)
     if (model.archived) return yield* new InvalidInput({ message: 'Ce modèle est archivé.' })
     for (const point of model.points) yield* checkLocation(point.location, model.building_id)
+    if (yield* db.first(sql("SELECT id FROM technical_visits WHERE template_id=? AND status='planned'", model.id)))
+      return yield* new VisitAlreadyPlanned()
     const id = crypto.randomUUID(),
       at = yield* now
     yield* db.batch([

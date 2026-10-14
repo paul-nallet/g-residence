@@ -15,6 +15,7 @@ import { today } from '../../src/domain/rules.ts'
 import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
 import { call } from '../lib/api.ts'
+import { useHashPage, useHashParam } from '../lib/hashParams.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import {
   barRadius,
@@ -96,18 +97,27 @@ function MeterEditor({ close, saved }: { close: () => void; saved: () => void })
   )
 }
 
+const defaultDay = (month?: string) => {
+  const day = today()
+  if (!month || month >= day.slice(0, 7)) return day
+  const [year = 0, index = 0] = month.split('-').map(Number)
+  return new Date(Date.UTC(year, index, 0)).toISOString().slice(0, 10)
+}
+
 function ReadingEditor({
   meter,
   reading,
+  month,
   close,
   saved,
 }: {
   meter: Meter
   reading?: Reading
+  month?: string
   close: () => void
   saved: () => void
 }) {
-  const [date, setDate] = useState(reading?.observed_on ?? today()),
+  const [date, setDate] = useState(reading?.observed_on ?? defaultDay(month)),
     [value, setValue] = useState(reading ? String(reading.value).replace('.', ',') : '')
   const mutation = useMutation()
   const parsed = Number(value.replace(',', '.'))
@@ -399,8 +409,8 @@ function MeterHistory({ meter, changed }: { meter: Meter; changed: () => void })
 }
 
 export function Meters() {
-  const [month, setMonth] = useState(today().slice(0, 7)),
-    [page, setPage] = useState(1),
+  const [month, setMonth] = useHashParam('mois', today().slice(0, 7)),
+    [page, setPage] = useHashPage(),
     [adding, setAdding] = useState(false),
     [recording, setRecording] = useState<Meter | null>(null),
     [success, setSuccess] = useState('')
@@ -544,6 +554,7 @@ export function Meters() {
       {recording && (
         <ReadingEditor
           meter={recording}
+          month={month}
           close={() => setRecording(null)}
           saved={() => {
             setRecording(null)

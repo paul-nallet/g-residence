@@ -38,8 +38,16 @@ export const Lot = Schema.Struct({
   occupancy: Occupancy,
 })
 export type Lot = typeof Lot.Type
+export const LotRow = Schema.Struct({
+  ...Lot.fields,
+  resident: Schema.String,
+  stay_start: Schema.NullOr(Schema.String),
+  stay_end: Schema.NullOr(Schema.String),
+  notice: Schema.Number,
+})
+export type LotRow = typeof LotRow.Type
 export const LotPage = Schema.Struct({
-  items: Schema.Array(Lot),
+  items: Schema.Array(LotRow),
   total: Schema.Number,
   page: Schema.Number,
   pageSize: Schema.Number,
@@ -63,6 +71,7 @@ export const LotDetail = Schema.Struct({
 
 export class LotNotFound extends Schema.TaggedError<LotNotFound>()('LotNotFound', {}) {}
 export class BuildingNotFound extends Schema.TaggedError<BuildingNotFound>()('BuildingNotFound', {}) {}
+export class LotNumberTaken extends Schema.TaggedError<LotNumberTaken>()('LotNumberTaken', {}) {}
 export class BuildingNameTaken extends Schema.TaggedError<BuildingNameTaken>()('BuildingNameTaken', {}) {}
 export class BuildingRequired extends Schema.TaggedError<BuildingRequired>()('BuildingRequired', {}) {}
 export class BuildingOutOfScope extends Schema.TaggedError<BuildingOutOfScope>()('BuildingOutOfScope', {}) {}
@@ -72,6 +81,7 @@ export type LotsError =
   | LotNotFound
   | BuildingNotFound
   | BuildingNameTaken
+  | LotNumberTaken
   | BuildingRequired
   | BuildingOutOfScope
   | LotHasActiveStays

@@ -12,6 +12,7 @@ const lotErrors = {
   LotNotFound: notFound('Lot introuvable.'),
   BuildingNotFound: notFound('Bâtiment introuvable dans cette résidence.'),
   BuildingNameTaken: conflict('Un bâtiment porte déjà ce nom dans cette résidence.'),
+  LotNumberTaken: conflict('Un lot porte déjà ce numéro dans cette résidence.'),
   BuildingRequired: badRequest('Choisissez un bâtiment pour le lot.'),
   BuildingOutOfScope: conflict('Le bâtiment doit appartenir à la résidence du lot.'),
   LotHasActiveStays: conflict('Terminez ou annulez les séjours avant d’archiver le lot.'),

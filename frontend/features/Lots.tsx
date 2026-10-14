@@ -10,11 +10,14 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Token } from '@astryxdesign/core/Token'
-import { type Lot, LotArchiveFilter, LotSort, LotStateFilter } from '../../src/domain/lots.ts'
+import { Link } from '@astryxdesign/core/Link'
+import { type Lot, LotArchiveFilter, type LotRow, LotSort, LotStateFilter } from '../../src/domain/lots.ts'
 import type { Me } from '../../src/domain/accounts.ts'
 import { call } from '../lib/api.ts'
+import { useHashPage, useHashParam } from '../lib/hashParams.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
-import { Editor, Feedback, Loading, StateToken } from './shared.tsx'
+import { today } from '../../src/domain/rules.ts'
+import { dateLabel, Editor, Feedback, Loading, StateToken } from './shared.tsx'
 
 const loadBuildings = () => call((client) => client.buildings.list())
 
@@ -98,14 +101,21 @@ export function LotEditor({ lot, close, saved }: { lot?: Lot; close: () => void;
     </Editor>
   )
 }
+const stayDates = (row: LotRow) =>
+  row.occupancy === 'planned'
+    ? 'Entrée prévue le ' + dateLabel(row.stay_start ?? '')
+    : row.stay_end
+      ? (row.notice ? 'Départ le ' : 'Fin prévue le ') + dateLabel(row.stay_end)
+      : 'Depuis le ' + dateLabel(row.stay_start ?? '')
+
 export function Lots({ me }: { me: Me }) {
-  const [q, setQ] = useState(''),
-    [state, setState] = useState<LotStateFilter>('all'),
-    [building, setBuilding] = useState('all'),
+  const [q, setQ] = useHashParam('q', ''),
+    [state, setState] = useHashParam<LotStateFilter>('occupation', 'all'),
+    [building, setBuilding] = useHashParam('batiment', 'all'),
     [buildingEditor, setBuildingEditor] = useState(false),
-    [archived, setArchived] = useState<LotArchiveFilter>('no'),
-    [sort, setSort] = useState<LotSort>('number'),
-    [page, setPage] = useState(1),
+    [archived, setArchived] = useHashParam<LotArchiveFilter>('archives', 'no'),
+    [sort, setSort] = useHashParam<LotSort>('tri', 'number'),
+    [page, setPage] = useHashPage(),
     [editor, setEditor] = useState<Lot | 'new' | null>(null)
   const load = useCallback(
     () => call((client) => client.lots.list({ query: { q, state, building, archived, sort, page } })),
@@ -113,7 +123,7 @@ export function Lots({ me }: { me: Me }) {
   )
   const result = useQuery(`lots:${q}:${state}:${building}:${archived}:${sort}:${page}`, load)
   const buildings = useQuery('buildings', loadBuildings)
-  const pagination = useTablePagination<Lot>({
+  const pagination = useTablePagination<LotRow>({
     page,
     onPageChange: setPage,
     totalItems: result.data?.total ?? 0,
@@ -153,7 +163,7 @@ export function Lots({ me }: { me: Me }) {
             setPage(1)
           }}
           hasClear
-          placeholder="Numéro, étage, type"
+          placeholder={me.role === 'cleaner' ? 'Numéro, étage, type' : 'Lot, occupant, étage…'}
         />
         <Selector
           label="Bâtiment"
@@ -228,8 +238,26 @@ export function Lots({ me }: { me: Me }) {
                   key: 'number',
                   header: 'Lot',
                   width: proportional(1),
-                  renderCell: (row) => <Button label={'Lot ' + row.number} href={'#lots/' + row.id} variant="ghost" />,
+                  renderCell: (row) => <Link href={'#lots/' + row.id}>{'Lot ' + row.number}</Link>,
                 },
+                ...(me.role !== 'cleaner'
+                  ? [
+                      {
+                        key: 'resident',
+                        header: 'Occupant',
+                        width: proportional(2),
+                        renderCell: (row: LotRow) =>
+                          row.resident ? (
+                            <VStack gap={0}>
+                              <Text>{row.resident}</Text>
+                              <Text type="supporting">{stayDates(row)}</Text>
+                            </VStack>
+                          ) : (
+                            <Text color="secondary">—</Text>
+                          ),
+                      },
+                    ]
+                  : []),
                 {
                   key: 'building_name',
                   header: 'Bâtiment',
@@ -246,7 +274,13 @@ export function Lots({ me }: { me: Me }) {
                     row.archived ? (
                       <Token label="Archivé" color="gray" />
                     ) : (
-                      <StateToken state={row.occupancy === 'planned' ? 'Entrée prévue' : row.occupancy} />
+                      <HStack gap={1} wrap="wrap">
+                        <StateToken state={row.occupancy === 'planned' ? 'Entrée prévue' : row.occupancy} />
+                        {row.notice ? <Token label="Préavis" color="orange" /> : null}
+                        {row.occupancy === 'planned' && row.stay_start && row.stay_start < today() ? (
+                          <Token label="Entrée à confirmer" color="red" />
+                        ) : null}
+                      </HStack>
                     ),
                 },
                 {
@@ -271,7 +305,7 @@ export function Lots({ me }: { me: Me }) {
           ) : (
             <Text>
               Aucun lot trouvé.{' '}
-              {q || state !== 'all' || building !== 'all'
+              {q || state !== 'all' || building !== 'all' || archived !== 'no'
                 ? 'Modifiez les filtres.'
                 : me.role === 'cleaner'
                   ? 'Les lots seront ajoutés par la gestion.'

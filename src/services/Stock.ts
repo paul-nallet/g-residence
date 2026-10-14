@@ -360,6 +360,22 @@ const make = Effect.gen(function* () {
       return yield* new InvalidInput({ message: 'La date du mouvement ne peut pas être dans le futur.' })
     if (input.kind !== 'count' && input.quantity < 1)
       return yield* new InvalidInput({ message: 'Saisissez une quantité d’au moins 1.' })
+    if (input.kind === 'count') {
+      const latest = yield* db.first<{ day: string | null }>(
+        sql(
+          'SELECT MAX(occurred_on) AS day FROM stock_movements WHERE item_id=? AND residence_id=?',
+          id,
+          me.residenceId,
+        ),
+      )
+      if (latest?.day && input.occurred_on < latest.day)
+        return yield* new InvalidInput({
+          message:
+            'Un inventaire ne peut pas précéder le dernier mouvement, daté du ' +
+            latest.day.split('-').reverse().join('/') +
+            '.',
+        })
+    }
     yield* db
       .batch(movementStatements(me, yield* now, id, input))
       .pipe(onViolation('stock_not_negative', () => new StockInsufficient()))

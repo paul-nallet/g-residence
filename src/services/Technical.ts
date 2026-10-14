@@ -749,6 +749,25 @@ const make = Effect.gen(function* () {
             ),
           ]
         : []),
+      ...(input.action === 'finish' || input.action === 'cancel'
+        ? [
+            sql(
+              "UPDATE interventions SET status='cancelled' WHERE work_id=? AND residence_id=? AND status='planned' AND starts_at>?",
+              id,
+              me.residenceId,
+              at,
+            ),
+          ]
+        : []),
+      ...(input.action === 'cancel'
+        ? [
+            sql(
+              "UPDATE issues SET work_id=NULL WHERE work_id=? AND residence_id=? AND status='open'",
+              id,
+              me.residenceId,
+            ),
+          ]
+        : []),
       change(me, at, 'work', id, before, { ...next, comment: input.comment }),
     ])
     return { ok: true }
@@ -779,7 +798,7 @@ const make = Effect.gen(function* () {
     if ('intervention' in target && !before) return yield* new InterventionNotFound()
     const workId = before?.work_id ?? ('work' in target ? target.work : '')
     const owner = yield* findWork(me, workId)
-    if (!before && (owner.state === 'done' || owner.state === 'cancelled'))
+    if ((!before || input.status === 'planned') && (owner.state === 'done' || owner.state === 'cancelled'))
       return yield* new InvalidInput({ message: 'Ce chantier est clos. Rouvrez-le pour planifier une intervention.' })
     const instant = appointmentInstant(input.local_start)
     if (!instant)

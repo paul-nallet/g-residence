@@ -44,7 +44,7 @@ import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
 import { call } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
-import { useHashParam } from '../lib/hashParams.ts'
+import { useHashPage, useHashParam } from '../lib/hashParams.ts'
 import { Journal } from './journal.tsx'
 import { DateField, dateLabel, Editor, Feedback, Loading, StateToken } from './shared.tsx'
 
@@ -571,7 +571,7 @@ export function TechnicalWork({ id }: { id: string }) {
           <ListItem
             key={issue.id}
             label={'Signalement · ' + issue.title}
-            href="#technical/signalements"
+            href={'#technical/signalements?statut=all&q=' + encodeURIComponent(issue.title)}
             endContent={<Token label={issueLabels[issue.status]} color={issueColors[issue.status]} size="sm" />}
           />
         ))}
@@ -1046,9 +1046,9 @@ function WorksColumn({
 const workFilterLabels: Record<WorkFilter, string> = { active: 'En cours et à venir', all: 'Tous', ...workStatusLabels }
 
 export function TechnicalWorks() {
-  const [q, setQ] = useState(''),
-    [status, setStatus] = useState<WorkFilter>('active'),
-    [priority, setPriority] = useState<PriorityFilterValue>('all'),
+  const [q, setQ] = useHashParam('q', ''),
+    [status, setStatus] = useHashParam<WorkFilter>('statut', 'active'),
+    [priority, setPriority] = useHashParam<PriorityFilterValue>('priorite', 'all'),
     [view, setView] = useHashParam('vue', 'tableau'),
     [location, setLocation] = useHashParam('lieu', ''),
     [supplier, setSupplier] = useHashParam('fournisseur', ''),
@@ -1259,10 +1259,10 @@ function IssueEditor({
 }
 
 export function TechnicalIssues() {
-  const [q, setQ] = useState(''),
-    [status, setStatus] = useState<'all' | IssueStatus>('open'),
-    [priority, setPriority] = useState<PriorityFilterValue>('all'),
-    [page, setPage] = useState(1),
+  const [q, setQ] = useHashParam('q', ''),
+    [status, setStatus] = useHashParam<'all' | IssueStatus>('statut', 'open'),
+    [priority, setPriority] = useHashParam<PriorityFilterValue>('priorite', 'all'),
+    [page, setPage] = useHashPage(),
     [dialog, setDialog] = useState<{ kind: 'issue'; issue?: Issue } | { kind: 'work'; issue: Issue } | null>(null),
     [success, setSuccess] = useState('')
   const options = useQuery('technical-options', loadOptions)

@@ -4,6 +4,7 @@ import { CurrentUser, manager } from '../domain/CurrentUser.ts'
 import {
   type Building,
   BuildingNameTaken,
+  LotNumberTaken,
   BuildingNotFound,
   BuildingOutOfScope,
   BuildingRequired,
@@ -14,6 +15,7 @@ import {
   type LotInput,
   LotNotFound,
   type LotQuery,
+  type LotRow,
   PAGE_SIZE,
 } from '../domain/lots.ts'
 import type { Inspection, Notice, Stay } from '../domain/stays.ts'
@@ -27,6 +29,13 @@ type Query = { readonly [K in keyof typeof LotQuery]?: (typeof LotQuery)[K]['Typ
 const occupancy =
   "CASE WHEN EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_start IS NOT NULL AND s.actual_end IS NULL) THEN 'occupied' WHEN EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_start IS NULL) THEN 'planned' ELSE 'vacant' END"
 const lotColumns = `l.id,l.number,l.floor,l.type,l.archived,l.building_id,(SELECT name FROM buildings WHERE id=l.building_id AND residence_id=l.residence_id) AS building_name,${occupancy} AS occupancy`
+const currentStay =
+  '(SELECT s.id FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_end IS NULL ORDER BY s.actual_start IS NULL,s.planned_start LIMIT 1)'
+const rowColumns = (hidden: boolean) =>
+  `${lotColumns},${hidden ? "''" : `COALESCE((SELECT first_name || ' ' || last_name FROM stays WHERE id=${currentStay}),'')`} AS resident,
+  (SELECT COALESCE(actual_start,planned_start) FROM stays WHERE id=${currentStay}) AS stay_start,
+  (SELECT planned_end FROM stays WHERE id=${currentStay}) AS stay_end,
+  EXISTS(SELECT 1 FROM notices n WHERE n.stay_id=${currentStay} AND n.withdrawn=0) AS notice`
 const stayFields = 'id,lot_id,first_name,last_name,planned_start,planned_end,actual_start,actual_end,cancelled'
 const noticeFields = 'id,stay_id,received_on,departure_on,comment,withdrawn'
 const inspectionFields = 'id,stay_id,kind,starts_at,duration,status,completed_on,comment'
@@ -78,12 +87,15 @@ const make = Effect.gen(function* () {
     const search = searchPattern(input.q)
     const state = input.state ?? 'all',
       building = input.building ?? 'all'
-    const filter = `l.residence_id=? AND l.archived=? AND (${folded('l.number')} LIKE ? ESCAPE '\\' OR ${folded('l.floor')} LIKE ? ESCAPE '\\' OR ${folded('l.type')} LIKE ? ESCAPE '\\') AND (?='all' OR ${occupancy}=?) AND (?='all' OR l.building_id=?)`
+    const filter = `l.residence_id=? AND l.archived=? AND (${folded('l.number')} LIKE ? ESCAPE '\\' OR ${folded('l.floor')} LIKE ? ESCAPE '\\' OR ${folded('l.type')} LIKE ? ESCAPE '\\' OR l.id IN (SELECT lot_id FROM (SELECT s.lot_id,${folded("(s.first_name || ' ' || s.last_name)")} AS resident FROM stays s WHERE ?=0 AND s.residence_id=? AND s.cancelled=0 AND s.actual_end IS NULL) WHERE resident LIKE ? ESCAPE '\\')) AND (?='all' OR ${occupancy}=?) AND (?='all' OR l.building_id=?)`
     const values = [
       me.residenceId,
       input.archived === 'yes' ? 1 : 0,
       search,
       search,
+      search,
+      me.role === 'cleaner' ? 1 : 0,
+      me.residenceId,
       search,
       state,
       state,
@@ -93,9 +105,9 @@ const make = Effect.gen(function* () {
     const sort = input.sort === 'floor' ? 'l.floor COLLATE NOCASE,l.number COLLATE NOCASE' : 'l.number COLLATE NOCASE'
     const [count, items] = yield* Effect.all([
       db.first<{ total: number }>(sql(`SELECT COUNT(*) AS total FROM lots l WHERE ${filter}`, ...values)),
-      db.all<Lot>(
+      db.all<LotRow>(
         sql(
-          `SELECT ${lotColumns} FROM lots l WHERE ${filter} ORDER BY ${sort},l.id LIMIT ? OFFSET ?`,
+          `SELECT ${rowColumns(me.role === 'cleaner')} FROM lots l WHERE ${filter} ORDER BY ${sort},l.id LIMIT ? OFFSET ?`,
           ...values,
           PAGE_SIZE,
           (page - 1) * PAGE_SIZE,
@@ -178,7 +190,10 @@ const make = Effect.gen(function* () {
             ),
         auditStatement(me, yield* now, lotId, id ? 'Lot corrigé' : 'Lot créé', before, data),
       ])
-      .pipe(buildingViolations)
+      .pipe(
+        buildingViolations,
+        onViolation('UNIQUE constraint failed: lots.', () => new LotNumberTaken()),
+      )
     return { ok: true }
   })
 

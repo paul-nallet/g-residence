@@ -79,18 +79,22 @@ function CleaningTabs({ current }: { current: 'planning' | 'templates' }) {
 function PlanEditor({
   options,
   day,
+  agentId = '',
   lotIds = [],
   close,
   saved,
 }: {
   options: CleaningOptions
   day: string
+  agentId?: string
   lotIds?: readonly string[]
   close: () => void
   saved: (count: number) => void
 }) {
   const [lots, setLots] = useState<string[]>([...lotIds]),
-    [agent, setAgent] = useState(options.agents[0]?.id ?? ''),
+    [agent, setAgent] = useState(
+      options.agents.some((item) => item.id === agentId) ? agentId : (options.agents[0]?.id ?? ''),
+    ),
     [date, setDate] = useState(day),
     [template, setTemplate] = useState(''),
     [priority, setPriority] = useState<Priority>('normal'),
@@ -561,6 +565,7 @@ export function Cleaning({ me }: { me: Me }) {
         <PlanEditor
           options={options.data}
           day={date}
+          agentId={agent}
           close={() => setPlanning(false)}
           saved={(count) => {
             setPlanning(false)
@@ -752,7 +757,7 @@ function Checklist({
               label={(kind === 'task' ? 'Fait : ' : 'Conforme : ') + item.label}
               isLabelHidden
               value={item.state === 'done'}
-              isReadOnly={!editable}
+              isReadOnly={!editable || item.state === 'issue'}
               isDisabled={busy}
               onChange={(checked) => setState(item, checked ? 'done' : 'todo')}
             />

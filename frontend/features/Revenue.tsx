@@ -26,6 +26,7 @@ import { today } from '../../src/domain/rules.ts'
 import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
 import { call } from '../lib/api.ts'
+import { useHashPage, useHashParam } from '../lib/hashParams.ts'
 import { copyText } from '../lib/clipboard.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import {
@@ -664,8 +665,8 @@ export function RevenueYear() {
 }
 
 export function Revenue() {
-  const [month, setMonth] = useState(today().slice(0, 7)),
-    [page, setPage] = useState(1),
+  const [month, setMonth] = useHashParam('mois', today().slice(0, 7)),
+    [page, setPage] = useHashPage(),
     [adding, setAdding] = useState(false),
     [recording, setRecording] = useState<RevenueSource | null>(null),
     [success, setSuccess] = useState('')

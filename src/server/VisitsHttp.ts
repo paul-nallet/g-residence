@@ -1,11 +1,14 @@
 import { Effect } from 'effect'
 import { HttpApiBuilder } from 'effect/http-api'
 import { Api } from '../api/Api.ts'
-import type { VisitNotFound, VisitConflict } from '../domain/visits.ts'
+import type { VisitAlreadyPlanned, VisitNotFound, VisitConflict } from '../domain/visits.ts'
 import { Visits } from '../services/Visits.ts'
 import { conflict, httpErrors, notFound } from './errors.ts'
-const toHttp = httpErrors<VisitNotFound | VisitConflict>({
+const toHttp = httpErrors<VisitNotFound | VisitConflict | VisitAlreadyPlanned>({
   VisitNotFound: notFound('Visite, modèle ou point introuvable.'),
+  VisitAlreadyPlanned: conflict(
+    'Une visite de ce modèle est déjà prévue pour ce bâtiment. Terminez-la ou changez le titre.',
+  ),
   VisitConflict: conflict('Cette visite est close ou ce point est déjà lié à un signalement. Rechargez la page.'),
 })
 export const VisitsLive = HttpApiBuilder.group(

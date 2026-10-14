@@ -194,10 +194,10 @@ const make = (adminEmail: string) =>
         current = yield* now
       yield* db.batch([
         sql(
-          'UPDATE invitations SET used_at=? WHERE email=? AND expires_at<=? AND used_at IS NULL',
+          'UPDATE invitations SET used_at=? WHERE email=? AND residence_id=? AND used_at IS NULL',
           current,
           email,
-          current,
+          me.residenceId,
         ),
         sql(
           'INSERT INTO invitations(id,residence_id,email,role,hash,expires_at) VALUES(?,?,?,?,?,?)',

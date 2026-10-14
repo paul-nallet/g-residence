@@ -43,6 +43,7 @@ import { today } from '../../src/domain/rules.ts'
 import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
 import { call } from '../lib/api.ts'
+import { useHashPage, useHashParam } from '../lib/hashParams.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import {
   barRadius,
@@ -721,10 +722,10 @@ function ItemHistory({
 }
 
 export function Stock({ view }: { view: string }) {
-  const [q, setQ] = useState(''),
-    [category, setCategory] = useState(''),
-    [level, setLevel] = useState<StockLevelFilter>('all'),
-    [page, setPage] = useState(1),
+  const [q, setQ] = useHashParam('q', ''),
+    [category, setCategory] = useHashParam('categorie', ''),
+    [level, setLevel] = useHashParam<StockLevelFilter>('niveau', 'all'),
+    [page, setPage] = useHashPage(),
     [adding, setAdding] = useState(false),
     [moving, setMoving] = useState<{ item: StockItem; kind: MovementKind } | null>(null),
     [thresholdFor, setThresholdFor] = useState<StockItem | null>(null),
@@ -745,6 +746,8 @@ export function Stock({ view }: { view: string }) {
     [q, category, view, level, page],
   )
   const result = useQuery(`stock:${view}:${q}:${category}:${level}:${page}`, load)
+  const lastPage = Math.max(1, Math.ceil((result.data?.total ?? 0) / 20))
+  if (result.data && !result.isPending && page > lastPage) setPage(lastPage)
   const pagination = useTablePagination<StockItem>({
     page,
     onPageChange: setPage,

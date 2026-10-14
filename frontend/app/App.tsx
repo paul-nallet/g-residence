@@ -183,7 +183,7 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
     ) : id === 'lieux' ? (
       <TechnicalPlaces />
     ) : (
-      <TechnicalWorks key={query} />
+      <TechnicalWorks />
     )
   ) : section.id === 'reports' ? (
     <Reports />

@@ -1,6 +1,6 @@
 import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
-import { useCallback, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Divider } from '@astryxdesign/core/Divider'
 import { Heading } from '@astryxdesign/core/Heading'
@@ -13,6 +13,7 @@ import type { Me } from '../../src/domain/accounts.ts'
 import type { Inspection, Notice, Stay } from '../../src/domain/stays.ts'
 import { parisDate, parisTime } from '../../src/domain/rules.ts'
 import { call } from '../lib/api.ts'
+import { useHashParam } from '../lib/hashParams.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { LotCleaning } from './Cleaning.tsx'
 import { OccupationsTable } from './OccupationsTable.tsx'
@@ -33,9 +34,13 @@ export function LotDetail({ id, me }: { id: string; me: Me }) {
   const load = useCallback(() => call((client) => client.lots.detail({ params: { id } })), [id]),
     result = useQuery('lot:' + id, load),
     [edit, setEdit] = useState<Edit | null>(null),
-    [tab, setTab] = useState('overview'),
+    [tab, setTab] = useHashParam('onglet', 'overview'),
     panelPrefix = useId(),
-    mutation = useMutation()
+    mutation = useMutation(),
+    { reset } = mutation
+  useEffect(() => {
+    if (edit) reset()
+  }, [edit, reset])
   useDetailCrumb(result.data ? 'Lot ' + result.data.lot.number : '')
   if (!result.data)
     return (

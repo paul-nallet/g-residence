@@ -62,5 +62,9 @@ export function useMutation() {
       setBusy(false)
     }
   }
-  return { busy, error, success, run }
+  const reset = useCallback(() => {
+    setError('')
+    setSuccess('')
+  }, [])
+  return { busy, error, success, run, reset }
 }

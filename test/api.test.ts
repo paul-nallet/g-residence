@@ -3,6 +3,7 @@ import test from 'node:test'
 import { createApiHandler, SESSION_COOKIE } from '../src/server/Http.ts'
 import { database } from './helpers/database.ts'
 import type { Report } from '../src/domain/agenda.ts'
+import { today } from '../src/domain/rules.ts'
 
 const environment = async () => {
   const { port, sqlite } = database(),
@@ -929,8 +930,9 @@ test('stocks : articles libres, mouvements, inventaire, stocks faibles et isolat
     )
     assert.equal(list.low, 2)
     assert.equal((await move('in', 10)).status, 200)
-    assert.equal((await move('count', 11)).status, 200)
-    assert.equal((await move('count', 11)).status, 200)
+    assert.equal((await move('count', 11)).status, 400)
+    assert.equal((await move('count', 11, today())).status, 200)
+    assert.equal((await move('count', 11, today())).status, 200)
     const history = (await (await e.request(path)).json()) as {
       items: { kind: string; delta: number; quantity_after: number }[]
       total: number

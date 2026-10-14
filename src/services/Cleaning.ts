@@ -62,6 +62,10 @@ const violations = <A, E, R>(self: Effect.Effect<A, E | SqlError, R>) =>
     onViolation('cleaning_agent', () => new CleaningAgentInvalid()),
     onViolation('cleaning_incomplete', () => new CleaningIncomplete()),
     onViolation('cleaning_locked', () => new CleaningLocked()),
+    onViolation(
+      'lot_unavailable',
+      () => new InvalidInput({ message: 'Un des lots choisis est archivé ou introuvable. Rechargez la page.' }),
+    ),
   )
 
 const make = Effect.gen(function* () {
