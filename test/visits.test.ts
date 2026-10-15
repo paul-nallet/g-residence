@@ -280,16 +280,20 @@ test('visites : planification directe atomique sans création préalable de mod�
       completed_on: null,
       report: '',
     })
-    const next = await e.json<{ id: string }>('/technical/visits/new', 'POST', {
-      ...payload,
-      frequency: 'weekly',
-      points: [{ zone: 'Hall', label: 'Porte', location: null }],
-    })
-    const nextDetail = await e.json<VisitDetail>('/technical/visits/' + next.id)
-    assert.equal(nextDetail.template_id, detail.template_id)
-    assert.equal(nextDetail.points.length, 1)
-    assert.equal((await e.json<VisitDetail>('/technical/visits/' + visit.id)).points.length, 2)
-    assert.equal((e.sqlite.prepare('SELECT COUNT(*) AS n FROM visit_templates').get() as { n: number }).n, 1)
+    assert.equal(
+      await e.status('/technical/visits/new', 'POST', {
+        ...payload,
+        name: model.name.toUpperCase(),
+        frequency: 'weekly',
+        points: [{ zone: 'Hall', label: 'Porte', location: null }],
+      }),
+      409,
+    )
+    const template = await e.json<VisitTemplate>('/technical/visit-templates/' + detail.template_id)
+    assert.deepEqual([template.frequency, template.points.length], ['monthly', 2])
+    const other = await e.json<{ id: string }>('/technical/visits/new', 'POST', { ...payload, name: 'Visite du hall' })
+    assert.notEqual((await e.json<VisitDetail>('/technical/visits/' + other.id)).template_id, detail.template_id)
+    assert.equal((e.sqlite.prepare('SELECT COUNT(*) AS n FROM visit_templates').get() as { n: number }).n, 2)
   } finally {
     await e.dispose()
   }

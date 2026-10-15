@@ -8,6 +8,7 @@ import {
   nextVisitDate,
   VisitAlreadyPlanned,
   VisitConflict,
+  VisitTemplateNameTaken,
   VisitNotFound,
   VisitPointInput,
   type VisitTemplateInput,
@@ -231,33 +232,21 @@ const make = Effect.gen(function* () {
         input.name,
       ),
     )
-    if (
-      previous &&
-      (yield* db.first(sql("SELECT id FROM technical_visits WHERE template_id=? AND status='planned'", previous.id)))
-    )
-      return yield* new VisitAlreadyPlanned()
+    if (previous) return yield* new VisitTemplateNameTaken()
     const id = crypto.randomUUID(),
-      templateId = previous?.id ?? crypto.randomUUID(),
+      templateId = crypto.randomUUID(),
       at = yield* now
     yield* db.batch([
-      previous
-        ? sql(
-            'UPDATE visit_templates SET frequency=?,archived=0,points_json=? WHERE id=? AND residence_id=?',
-            input.frequency,
-            JSON.stringify(input.points),
-            templateId,
-            me.residenceId,
-          )
-        : sql(
-            'INSERT INTO visit_templates(id,residence_id,building_id,name,frequency,first_due,points_json) VALUES(?,?,?,?,?,?,?)',
-            templateId,
-            me.residenceId,
-            input.building_id,
-            input.name,
-            input.frequency,
-            input.frequency === 'once' ? null : input.scheduled_on,
-            JSON.stringify(input.points),
-          ),
+      sql(
+        'INSERT INTO visit_templates(id,residence_id,building_id,name,frequency,first_due,points_json) VALUES(?,?,?,?,?,?,?)',
+        templateId,
+        me.residenceId,
+        input.building_id,
+        input.name,
+        input.frequency,
+        input.frequency === 'once' ? null : input.scheduled_on,
+        JSON.stringify(input.points),
+      ),
       sql(
         'INSERT INTO technical_visits(id,residence_id,template_id,building_id,name,frequency,scheduled_on,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
         id,
