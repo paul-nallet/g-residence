@@ -13,6 +13,7 @@
     "enabled": true,
     "traces": {
       "enabled": true,
+      "head_sampling_rate": 0.05,
     },
   },
   "d1_databases": [
