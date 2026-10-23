@@ -20,6 +20,7 @@ import { Cleaning } from './Cleaning.ts'
 import { Lots } from './Lots.ts'
 import { Meters } from './Meters.ts'
 import { Stock } from './Stock.ts'
+import { Voice } from './Voice.ts'
 
 type Run = Effect.Effect<unknown, unknown, CurrentUser>
 type Tool = AiToolSpec & { label: string; run: (input: unknown, propose: (proposal: StudioProposal) => void) => Run }
@@ -60,6 +61,7 @@ const make = Effect.gen(function* () {
   const stock = yield* Stock
   const meters = yield* Meters
   const cleaning = yield* Cleaning
+  const voice = yield* Voice
 
   const tools: Tool[] = [
     tool(
@@ -179,7 +181,12 @@ const make = Effect.gen(function* () {
   const byName = new Map(tools.map((entry) => [entry.name, entry]))
   const specs = tools.map(({ name, description, parameters }) => ({ name, description, parameters }))
 
-  const status = Effect.succeed({ available: ai.available, provider: ai.name, model: ai.model })
+  const status = Effect.succeed({
+    available: ai.available,
+    provider: ai.name,
+    model: ai.model,
+    voice: ai.available && voice.available,
+  })
 
   const ask = Effect.fn('Studio.ask')(function* (messages: readonly StudioMessage[], route?: string) {
     const me = yield* CurrentUser

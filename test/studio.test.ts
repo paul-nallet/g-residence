@@ -49,7 +49,7 @@ const environment = async (ai?: AiProviderPort) => {
 test('le studio signale l’absence de fournisseur', async () => {
   const { request } = await environment()
   const status = await request('/studio')
-  assert.deepEqual(await status.json(), { available: false, provider: 'aucun', model: '' })
+  assert.deepEqual(await status.json(), { available: false, provider: 'aucun', model: '', voice: false })
   const ask = await request('/studio/messages', 'POST', { messages: [{ role: 'user', content: 'Bonjour' }] })
   assert.equal(ask.status, 503)
 })

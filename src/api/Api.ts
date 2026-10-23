@@ -58,7 +58,15 @@ import {
 } from '../domain/revenue.ts'
 import { CivilDate, CivilMonth, Health, Ok, PageNumber } from '../domain/shared.ts'
 import { InspectionInput, NoticeInput, StayAction, StayInput } from '../domain/stays.ts'
-import { StudioInput, StudioReply, StudioStatus } from '../domain/studio.ts'
+import {
+  Speech,
+  SpeechInput,
+  StudioInput,
+  StudioReply,
+  StudioStatus,
+  Transcription,
+  TranscriptionInput,
+} from '../domain/studio.ts'
 import {
   MovementInput,
   MovementPage,
@@ -658,6 +666,16 @@ export class StudioGroup extends HttpApiGroup.make('studio')
     HttpApiEndpoint.post('ask', '/studio/messages', {
       payload: StudioInput,
       success: StudioReply,
+      error: [...errors, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post('transcribe', '/studio/transcriptions', {
+      payload: TranscriptionInput,
+      success: Transcription,
+      error: [...errors, ServiceUnavailable],
+    }),
+    HttpApiEndpoint.post('speak', '/studio/speech', {
+      payload: SpeechInput,
+      success: Speech,
       error: [...errors, ServiceUnavailable],
     }),
   )

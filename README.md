@@ -57,6 +57,22 @@ AI_MODEL=claude-opus-5-5
 
 `AI_MODEL` est facultatif. Le fournisseur est un port (`src/services/AiProvider.ts`) : un autre fournisseur s’ajoute par un adaptateur, sans toucher au studio.
 
+Fournisseurs : `anthropic` ou `mistral` (`mistral-medium-latest` par défaut).
+
+### Voix (expérimental)
+
+Avec une clé Mistral, le studio accepte la dictée : maintenir ⌥ M ou le bouton micro, relâcher pour envoyer (un appui bref démarre, un second envoie, Échap annule). La question dictée est transcrite par Voxtral, puis la réponse est lue à voix haute ; chaque réponse a aussi un bouton d’écoute.
+
+```
+AI_PROVIDER=mistral
+AI_API_KEY=...          # clé Mistral : chat et voix
+# ou, pour garder Claude au chat :
+MISTRAL_API_KEY=...     # voix seule
+AI_VOICE=...            # facultatif : identifiant de voix, sinon première voix française
+```
+
+Décision : `docs/decisions/0010-voix.md`.
+
 ## Vérifier
 
 ```bash

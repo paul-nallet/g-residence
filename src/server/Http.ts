@@ -7,6 +7,7 @@ import { Api } from '../api/Api.ts'
 import { Accounts } from '../services/Accounts.ts'
 import { AiPort, AiProvider, unavailableAi, type AiProviderPort } from '../services/AiProvider.ts'
 import { anthropicProvider } from '../services/anthropicProvider.ts'
+import { mistralProvider, mistralVoice } from '../services/mistralProvider.ts'
 import { Agenda } from '../services/Agenda.ts'
 import { Cleaning } from '../services/Cleaning.ts'
 import { Feedback } from '../services/Feedback.ts'
@@ -17,6 +18,7 @@ import { Revenue } from '../services/Revenue.ts'
 import { Stays } from '../services/Stays.ts'
 import { Stock } from '../services/Stock.ts'
 import { Studio } from '../services/Studio.ts'
+import { unavailableVoice, Voice, VoicePort, type VoiceProviderPort } from '../services/Voice.ts'
 import { Sync } from '../services/Sync.ts'
 import { Technical } from '../services/Technical.ts'
 import { AuthLive, AuthorizationLive, ManagementLive, SameOriginLive, TeamLive } from './AccountsHttp.ts'
@@ -48,7 +50,12 @@ const SystemLive = HttpApiBuilder.group(Api, 'system', (handlers) =>
   ),
 )
 
-export const createApiHandler = (db: DatabasePort, adminEmail = '', ai: AiProviderPort = unavailableAi) => {
+export const createApiHandler = (
+  db: DatabasePort,
+  adminEmail = '',
+  ai: AiProviderPort = unavailableAi,
+  voice: VoiceProviderPort = unavailableVoice,
+) => {
   const sql = Sql.layer.pipe(Layer.provide(Layer.succeed(Database, db)))
   const domain = Layer.mergeAll(
     Accounts.layer(adminEmail),
@@ -63,8 +70,10 @@ export const createApiHandler = (db: DatabasePort, adminEmail = '', ai: AiProvid
     Feedback.layer,
     Sync.layer,
   ).pipe(Layer.provide(sql))
+  const voiceLayer = Voice.layer.pipe(Layer.provide(Layer.succeed(VoicePort, voice)))
   const services = Studio.layer.pipe(
     Layer.provide(AiProvider.layer.pipe(Layer.provide(Layer.succeed(AiPort, ai)))),
+    Layer.provideMerge(voiceLayer),
     Layer.provideMerge(domain),
   )
   const api = HttpApiBuilder.layer(Api).pipe(
@@ -105,16 +114,29 @@ export const createApiHandler = (db: DatabasePort, adminEmail = '', ai: AiProvid
     disableLogger: true,
   })
 }
-const aiFromEnv = (env: { AI_PROVIDER: string; AI_MODEL: string; AI_API_KEY?: string }): AiProviderPort =>
-  env.AI_PROVIDER === 'anthropic' && env.AI_API_KEY
-    ? anthropicProvider({ apiKey: env.AI_API_KEY, model: env.AI_MODEL })
-    : unavailableAi
+type AiEnv = { AI_PROVIDER: string; AI_MODEL: string; AI_API_KEY?: string; AI_VOICE?: string; MISTRAL_API_KEY?: string }
+const aiFromEnv = (env: AiEnv): AiProviderPort =>
+  !env.AI_API_KEY
+    ? unavailableAi
+    : env.AI_PROVIDER === 'anthropic'
+      ? anthropicProvider({ apiKey: env.AI_API_KEY, model: env.AI_MODEL })
+      : env.AI_PROVIDER === 'mistral'
+        ? mistralProvider({ apiKey: env.AI_API_KEY, model: env.AI_MODEL })
+        : unavailableAi
+const voiceFromEnv = (env: AiEnv): VoiceProviderPort => {
+  const apiKey = env.MISTRAL_API_KEY || (env.AI_PROVIDER === 'mistral' ? env.AI_API_KEY : undefined)
+  return apiKey ? mistralVoice({ apiKey, voice: env.AI_VOICE }) : unavailableVoice
+}
 const handlers = new WeakMap<Env, (request: Request) => Promise<Response>>()
 export const apiHandler = (request: Request, env: Env) => {
   let handler = handlers.get(env)
   if (!handler) {
     const db = d1Database(env.DB)
-    handler = withReadCache(createApiHandler(db, env.ADMIN_EMAIL, aiFromEnv(env)).handler, db, memoryReadCache())
+    handler = withReadCache(
+      createApiHandler(db, env.ADMIN_EMAIL, aiFromEnv(env), voiceFromEnv(env)).handler,
+      db,
+      memoryReadCache(),
+    )
     handlers.set(env, handler)
   }
   return handler(request)
