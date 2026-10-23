@@ -13,7 +13,7 @@ Statut : proposé, 23 octobre 2026.
 
 ## Prérequis
 
-1. Compte Cloudflare en plan Workers Paid, alerte de budget configurée.
+1. Compte Cloudflare personnel de Paul (`account_id` fixé dans `wrangler.jsonc`), en plan Workers Paid, alerte de budget configurée. `npx wrangler whoami` doit lister ce compte ; sinon Wrangler refuse de déployer.
 2. Base `gresidence-production` existante sur ce compte, identifiant conforme à `wrangler.jsonc` (`npx wrangler d1 list`).
 3. `ADMIN_EMAIL` dans `wrangler.jsonc` = adresse du premier administrateur.
 4. Tarification « Cloudflare Observability » du 1er décembre 2026 relue.

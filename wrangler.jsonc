@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "gresidence",
+  "account_id": "81e47c99814bd0b5c897a58299c9ee8a",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-09",
   "assets": {
