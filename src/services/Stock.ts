@@ -381,7 +381,7 @@ const make = Effect.gen(function* () {
         return yield* new InvalidInput({
           message:
             'Un inventaire ne peut pas précéder le dernier mouvement, daté du ' +
-            latest.day.split('-').reverse().join('/') +
+            latest.day.split('-').toReversed().join('/') +
             '.',
         })
     }

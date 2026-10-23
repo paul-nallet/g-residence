@@ -118,8 +118,8 @@ export const uniqueCategoryNames = (names: ReadonlyArray<string>) => {
   return [...unique.values()]
 }
 
-export const movementDelta = (kind: 'in' | 'out' | 'count', quantity: number) =>
-  kind === 'count' ? null : kind === 'in' ? quantity : -quantity
+export const movementDelta = (kind: 'in' | 'out' | 'count', amount: number) =>
+  kind === 'count' ? null : kind === 'in' ? amount : -amount
 
 export const movementYear = (
   year: number,

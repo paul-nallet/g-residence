@@ -44,6 +44,10 @@ const inspectionEvent = (inspection: InspectionRow, hidden: boolean): Event => (
   comment: hidden ? '' : inspection.comment,
 })
 
+const lotActor = (id: string, preferred: string) => `(SELECT u.name FROM history h JOIN users u ON u.id=h.actor_id
+  WHERE h.residence_id=l.residence_id AND h.lot_id=l.id AND json_extract(h.after_json,'$.id')=${id}
+  ORDER BY h.action='${preferred}' DESC,h.created_at DESC LIMIT 1)`
+
 const make = Effect.gen(function* () {
   const db = yield* Sql
 
@@ -183,16 +187,13 @@ const make = Effect.gen(function* () {
     const from = monday(date),
       to = addDays(from, 6)
     const subject = `'Lot ' || l.number || COALESCE(' · ' || b.name,'')`
-    const actor = (id: string, preferred: string) => `(SELECT u.name FROM history h JOIN users u ON u.id=h.actor_id
-      WHERE h.residence_id=l.residence_id AND h.lot_id=l.id AND json_extract(h.after_json,'$.id')=${id}
-      ORDER BY h.action='${preferred}' DESC,h.created_at DESC LIMIT 1)`
     const lots = 'JOIN lots l ON l.id=s.lot_id LEFT JOIN buildings b ON b.id=l.building_id'
     type Movement = { subject: string; actor: string | null }
     const [stays, notices, inspections] = yield* Effect.all([
       db.all<Stay & Movement & { number: string; exit_actor: string | null }>(
         sql(
-          `SELECT s.*,l.number,${subject} AS subject,${actor('s.id', 'Entrée réelle confirmée ou corrigée')} AS actor,
-          ${actor('s.id', 'Sortie réelle confirmée ou corrigée')} AS exit_actor
+          `SELECT s.*,l.number,${subject} AS subject,${lotActor('s.id', 'Entrée réelle confirmée ou corrigée')} AS actor,
+          ${lotActor('s.id', 'Sortie réelle confirmée ou corrigée')} AS exit_actor
           FROM stays s ${lots} WHERE s.residence_id=? AND s.cancelled=0 AND (s.actual_start BETWEEN ? AND ? OR s.actual_end BETWEEN ? AND ?)`,
           me.residenceId,
           from,
@@ -203,7 +204,7 @@ const make = Effect.gen(function* () {
       ),
       db.all<Notice & Resident & Movement>(
         sql(
-          `SELECT n.*,l.number,s.first_name,s.last_name,${subject} AS subject,${actor('n.id', 'Préavis reçu')} AS actor
+          `SELECT n.*,l.number,s.first_name,s.last_name,${subject} AS subject,${lotActor('n.id', 'Préavis reçu')} AS actor
           FROM notices n JOIN stays s ON s.id=n.stay_id ${lots} WHERE n.residence_id=? AND n.withdrawn=0 AND s.cancelled=0 AND n.received_on BETWEEN ? AND ?`,
           me.residenceId,
           from,
@@ -212,7 +213,7 @@ const make = Effect.gen(function* () {
       ),
       db.all<Inspection & Resident & Movement>(
         sql(
-          `SELECT i.*,l.number,s.first_name,s.last_name,${subject} AS subject,${actor('i.id', 'État des lieux réalisé')} AS actor
+          `SELECT i.*,l.number,s.first_name,s.last_name,${subject} AS subject,${lotActor('i.id', 'État des lieux réalisé')} AS actor
           FROM inspections i JOIN stays s ON s.id=i.stay_id ${lots} WHERE i.residence_id=? AND i.status='done' AND s.cancelled=0 AND i.completed_on BETWEEN ? AND ?`,
           me.residenceId,
           from,

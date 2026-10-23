@@ -81,7 +81,7 @@ export function Studio({ route, onClose }: { route: string; onClose: () => void 
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [entries, busy])
+  useEffect(() => end.current?.scrollIntoView({ block: 'end' }))
   const notice = (content: string) => setEntries((current) => [...current, { role: 'notice', content }])
   const send = async (text: string) => {
     const content = text.trim()

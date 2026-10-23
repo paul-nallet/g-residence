@@ -4,6 +4,8 @@ import { createApiHandler } from '../src/server/Http.ts'
 import { memoryReadCache, withReadCache } from '../src/server/ReadCache.ts'
 import { database } from './helpers/database.ts'
 
+const cached = (body: string) => ({ body, headers: [] })
+
 const environment = async () => {
   const { port, sqlite } = database()
   const web = createApiHandler(port)
@@ -130,11 +132,10 @@ describe('synchronisation', () => {
   test('le cache mémoire expire et reste borné', () => {
     let now = 0
     const cache = memoryReadCache({ capacity: 2, ttl: 1000, clock: () => now })
-    const entry = (body: string) => ({ body, headers: [] })
-    cache.set('a', entry('A'))
-    cache.set('b', entry('B'))
+    cache.set('a', cached('A'))
+    cache.set('b', cached('B'))
     assert.equal(cache.get('a')?.body, 'A')
-    cache.set('c', entry('C'))
+    cache.set('c', cached('C'))
     assert.equal(cache.get('b'), undefined)
     assert.equal(cache.get('a')?.body, 'A')
     now = 1001
