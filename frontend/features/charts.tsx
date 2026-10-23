@@ -2,13 +2,14 @@ import type { ReactNode } from 'react'
 import { Card } from '@astryxdesign/core/Card'
 import { HStack, VStack } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
+import { dataVars } from '@astryxdesign/core/theme/dataTokens.stylex'
 import type { LegendPayload, TooltipPayloadEntry } from 'recharts'
 
 export const chartColors = {
-  teal: 'var(--color-data-categorical-teal)',
-  orange: 'var(--color-data-categorical-orange)',
-  blue: 'var(--color-data-categorical-blue)',
-  muted: 'var(--color-data-gray-3)',
+  teal: dataVars['--color-data-categorical-teal'],
+  orange: dataVars['--color-data-categorical-orange'],
+  blue: dataVars['--color-data-categorical-blue'],
+  muted: dataVars['--color-data-gray-3'],
 }
 
 const tick = { fill: 'var(--color-text-secondary)', style: { fontSize: 'var(--font-size-sm)' } }
