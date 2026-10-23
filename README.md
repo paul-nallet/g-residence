@@ -41,7 +41,7 @@ Le ménage consulte les lots et les mouvements sans noms, commentaires ni rappor
 rtk proxy npx wrangler dev --port 8791 --persist-to .wrangler/v1-validation
 ```
 
-La configuration D1 contient un identifiant réservé au développement local. Aucun déploiement distant effectué. Une installation publique nécessitera une vraie ressource D1 et `ADMIN_EMAIL` ; sans email administrateur configuré, l’installation publique est verrouillée. Sessions par cookie HttpOnly, mots de passe hachés, limitation des tentatives et protection des mutations intersites.
+`wrangler.jsonc` pointe vers la base D1 `gresidence-production` ; en local, Wrangler travaille sur sa copie dans `.wrangler/state`. Sur un hôte public, la première installation est limitée à `ADMIN_EMAIL`. Mise en production depuis le poste de Paul : `rtk npm run deploy`, procédure dans `docs/decisions/0009-deploiement.md`. Sessions par cookie HttpOnly, mots de passe hachés, limitation des tentatives et protection des mutations intersites.
 
 ## AI Studio
 

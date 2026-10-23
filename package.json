@@ -16,7 +16,10 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && wrangler deploy --dry-run",
     "astryx": "node node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs",
     "types": "wrangler types",
-    "db:local": "wrangler d1 migrations apply DB --local"
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote:status": "wrangler d1 migrations list DB --remote",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run check && npm run db:remote && wrangler deploy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
