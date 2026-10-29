@@ -27,7 +27,7 @@ import type { Me, Role } from '../domain/accounts.ts'
 import { onViolation, sql, Sql, type SqlError, type Statement } from './Database.ts'
 
 const taskColumns = `t.id,t.lot_id,l.number AS lot_number,COALESCE(b.name,'') AS building_name,t.agent_id,a.name AS agent_name,
-  t.day,t.status,t.priority,t.template_name,t.note,t.report,t.completed_at,c.name AS completed_by,
+  t.day,t.status,t.priority,t.template_name,t.note,t.report,t.completed_at,c.name AS completed_by,t.position,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id) AS total,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state<>'todo') AS handled,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state='issue') AS issues,
@@ -230,7 +230,7 @@ const make = Effect.gen(function* () {
     const rows = yield* db.all<TaskRow>(
       sql(
         `SELECT ${taskColumns} WHERE t.residence_id=? AND t.day BETWEEN ? AND ? AND (?='' OR t.agent_id=?) AND (?='' OR t.priority=?)${scope.clause}
-        ORDER BY t.day,CASE t.status WHEN 'planned' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,
+        ORDER BY t.day,CASE t.status WHEN 'planned' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,t.position IS NULL,t.position,
           CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,l.number COLLATE NOCASE,t.id`,
         me.residenceId,
         input.from,
@@ -293,6 +293,7 @@ const make = Effect.gen(function* () {
     readonly priority?: Priority
     readonly template_id: string
     readonly note: string
+    readonly items?: readonly CleaningPoint[]
   }) {
     const me = yield* manager
     const lots = [...new Set(input.lot_ids)]
@@ -326,7 +327,7 @@ const make = Effect.gen(function* () {
             me.id,
             createdAt,
           ),
-          ...insertItems(me, id, template?.items ?? []),
+          ...insertItems(me, id, [...(template?.items ?? []), ...(input.items ?? [])]),
         ]
       }),
     )
@@ -342,8 +343,9 @@ const make = Effect.gen(function* () {
     yield* planned(before)
     yield* write([
       sql(
-        'UPDATE cleaning_tasks SET agent_id=?,day=?,note=?,priority=? WHERE id=? AND residence_id=?',
+        'UPDATE cleaning_tasks SET agent_id=?,day=?,position=CASE WHEN day=? THEN position END,note=?,priority=? WHERE id=? AND residence_id=?',
         input.agent_id,
+        input.day,
         input.day,
         input.note,
         input.priority ?? before.priority,
@@ -363,7 +365,34 @@ const make = Effect.gen(function* () {
     for (const id of ids) yield* planned(yield* findTask(id))
     yield* write(
       ids.map((id) =>
-        sql('UPDATE cleaning_tasks SET day=? WHERE id=? AND residence_id=?', input.day, id, me.residenceId),
+        sql(
+          'UPDATE cleaning_tasks SET day=?,position=NULL WHERE id=? AND residence_id=?',
+          input.day,
+          id,
+          me.residenceId,
+        ),
+      ),
+    )
+    return { ok: true }
+  })
+
+  const order = Effect.fn('Cleaning.order')(function* (input: {
+    readonly task_ids: readonly string[]
+    readonly day: string
+  }) {
+    const me = yield* manager
+    const ids = [...new Set(input.task_ids)]
+    for (const id of ids) {
+      const found = yield* findTask(id)
+      yield* planned(found)
+      if (found.day !== input.day)
+        return yield* new InvalidInput({
+          message: 'Ces ménages ne sont plus tous prévus ce jour-là. Rechargez la page.',
+        })
+    }
+    yield* write(
+      ids.map((id, index) =>
+        sql('UPDATE cleaning_tasks SET position=? WHERE id=? AND residence_id=?', index, id, me.residenceId),
       ),
     )
     return { ok: true }
@@ -452,6 +481,7 @@ const make = Effect.gen(function* () {
     task,
     update,
     reschedule,
+    order,
     setStatus,
     updateItem,
     addItem,

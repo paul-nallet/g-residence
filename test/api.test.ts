@@ -1384,6 +1384,107 @@ test('ménage : fiches, planning, checklist, réalisation par l’agent et isola
   }
 })
 
+test('ménage à la volée : checklist saisie à la création et consigne sur plusieurs lignes', async () => {
+  const e = await environment()
+  try {
+    const admin = (e.sqlite.prepare("SELECT id FROM users WHERE role='admin'").get() as { id: string }).id
+    await e.request('/lots', 'POST', { building_id: 'test-building', number: '7', floor: '', type: '' })
+    const lot = (e.sqlite.prepare("SELECT id FROM lots WHERE number='7'").get() as { id: string }).id
+    const input = { lot_ids: [lot], agent_id: admin, day: '2026-10-12', template_id: 'none' }
+    const note = 'Clés à l’accueil\nDépart à 10 h'
+    const items = [
+      { kind: 'task', label: 'Changer les draps' },
+      { kind: 'check', label: 'Fenêtres fermées' },
+    ]
+    assert.equal((await e.request('/cleaning/tasks', 'POST', { ...input, note, items })).status, 200)
+    assert.equal(
+      (await e.request('/cleaning/tasks', 'POST', { ...input, note: '', items: [{ kind: 'task', label: ' ' }] }))
+        .status,
+      400,
+    )
+    const [task] = (await (await e.request('/cleaning/tasks?from=2026-10-12&to=2026-10-12')).json()) as {
+      id: string
+    }[]
+    const detail = (await (await e.request('/cleaning/tasks/' + task!.id)).json()) as {
+      task: { note: string; total: number }
+      items: { kind: string; label: string }[]
+    }
+    assert.deepEqual(
+      [detail.task.note, detail.task.total, detail.items.map(({ kind, label }) => ({ kind, label }))],
+      [note, 2, items],
+    )
+  } finally {
+    await e.dispose()
+  }
+})
+
+test('ordre de passage ménage : tri manuel dans la journée, remis à zéro au report', async () => {
+  const e = await environment()
+  try {
+    const admin = (e.sqlite.prepare("SELECT id FROM users WHERE role='admin'").get() as { id: string }).id
+    const lots: string[] = []
+    for (const number of ['A', 'B', 'C']) {
+      await e.request('/lots', 'POST', { building_id: 'test-building', number, floor: '', type: '' })
+      lots.push((e.sqlite.prepare('SELECT id FROM lots WHERE number=?').get(number) as { id: string }).id)
+    }
+    const input = { lot_ids: lots, agent_id: admin, day: '2026-10-12', template_id: 'none', note: '' }
+    assert.equal((await e.request('/cleaning/tasks', 'POST', { ...input, priority: 'urgent' })).status, 200)
+    const day = '/cleaning/tasks?from=2026-10-12&to=2026-10-12'
+    const list = async () =>
+      ((await (await e.request(day)).json()) as { id: string; lot_number: string; position: number | null }[]).map(
+        (task) => [task.lot_number, task.position],
+      )
+    const ids = Object.fromEntries(
+      ((await (await e.request(day)).json()) as { id: string; lot_number: string }[]).map((task) => [
+        task.lot_number,
+        task.id,
+      ]),
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/order', 'POST', { day: '2026-10-12', task_ids: [ids.C, ids.A] })).status,
+      200,
+    )
+    assert.deepEqual(await list(), [
+      ['C', 0],
+      ['A', 1],
+      ['B', null],
+    ])
+    assert.equal(
+      (await e.request('/cleaning/tasks/order', 'POST', { day: '2026-10-13', task_ids: [ids.B] })).status,
+      400,
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/reschedule', 'POST', { day: '2026-10-13', task_ids: [ids.C] })).status,
+      200,
+    )
+    assert.deepEqual(await list(), [
+      ['A', 1],
+      ['B', null],
+    ])
+    assert.equal(
+      ((await (await e.request('/cleaning/tasks/' + ids.C)).json()) as { task: { position: number | null } }).task
+        .position,
+      null,
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + ids.A, 'PATCH', { agent_id: admin, day: '2026-10-12', note: 'Clés' }))
+        .status,
+      200,
+    )
+    assert.deepEqual((await list())[0], ['A', 1])
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + ids.A + '/status', 'POST', { status: 'done', report: '' })).status,
+      200,
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/order', 'POST', { day: '2026-10-12', task_ids: [ids.A] })).status,
+      409,
+    )
+  } finally {
+    await e.dispose()
+  }
+})
+
 test('priorités ménage : création multiple, filtre agent, correction, report et clôture', async () => {
   const e = await environment()
   try {
