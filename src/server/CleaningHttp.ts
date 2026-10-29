@@ -34,6 +34,7 @@ export const CleaningLive = HttpApiBuilder.group(
       .handle('task', ({ params }) => toHttp(cleaning.task(params.id)))
       .handle('update', ({ params, payload }) => toHttp(cleaning.update(params.id, payload)))
       .handle('reschedule', ({ payload }) => toHttp(cleaning.reschedule(payload)))
+      .handle('order', ({ payload }) => toHttp(cleaning.order(payload)))
       .handle('status', ({ params, payload }) => toHttp(cleaning.setStatus(params.id, payload)))
       .handle('addItem', ({ params, payload }) => toHttp(cleaning.addItem(params.id, payload)))
       .handle('item', ({ params, payload }) => toHttp(cleaning.updateItem(params.id, payload)))

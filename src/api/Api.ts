@@ -33,6 +33,7 @@ import {
   CleaningOptions,
   CleaningPoint,
   CleaningReschedule,
+  CleaningOrder,
   CleaningStatusInput,
   CleaningTask,
   CleaningTaskCreate,
@@ -542,6 +543,7 @@ export class CleaningGroup extends HttpApiGroup.make('cleaning')
       success: Ok,
       error: errors,
     }),
+    HttpApiEndpoint.post('order', '/cleaning/tasks/order', { payload: CleaningOrder, success: Ok, error: errors }),
     HttpApiEndpoint.get('task', '/cleaning/tasks/:id', { params: id, success: CleaningTaskDetail, error: errors }),
     HttpApiEndpoint.patch('update', '/cleaning/tasks/:id', {
       params: id,

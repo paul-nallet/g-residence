@@ -10,14 +10,13 @@ export const CleaningItemState = Schema.Literals(['todo', 'done', 'issue'])
 export type CleaningItemState = typeof CleaningItemState.Type
 export const CleaningStatus = Schema.Literals(['planned', 'done', 'cancelled'])
 export type CleaningStatus = typeof CleaningStatus.Type
-export const CleaningPoint = Schema.Struct({ kind: CleaningItemKind, label: RequiredText('Point de la fiche', 160) })
+export const CleaningPoint = Schema.Struct({ kind: CleaningItemKind, label: RequiredText('Intitulé du point', 160) })
 export type CleaningPoint = typeof CleaningPoint.Type
+const CleaningPoints = (message: string) => Schema.Array(CleaningPoint).check(Schema.isMaxLength(60, { message }))
 export const CleaningTemplateInput = Schema.Struct({
   name: RequiredText('Nom de la fiche', 80),
   is_default: Schema.Boolean,
-  items: Schema.Array(CleaningPoint).check(
-    Schema.isMaxLength(60, { message: 'Soixante points au maximum par fiche.' }),
-  ),
+  items: CleaningPoints('Soixante points au maximum par fiche.'),
   lot_ids: Schema.Array(Schema.String),
 })
 export const CleaningTemplate = Schema.Struct({
@@ -52,9 +51,17 @@ export const CleaningTaskCreate = Schema.Struct({
   day: CivilDate,
   template_id: Schema.String,
   note: OptionalText(1000),
+  items: Schema.optionalKey(CleaningPoints('Soixante points au maximum par tâche.')),
 })
 const taskCountMessage = 'Choisissez entre 1 et 100 tâches.'
 export const CleaningReschedule = Schema.Struct({
+  task_ids: Schema.Array(Schema.String).check(
+    Schema.isMinLength(1, { message: taskCountMessage }),
+    Schema.isMaxLength(100, { message: taskCountMessage }),
+  ),
+  day: CivilDate,
+})
+export const CleaningOrder = Schema.Struct({
   task_ids: Schema.Array(Schema.String).check(
     Schema.isMinLength(1, { message: taskCountMessage }),
     Schema.isMaxLength(100, { message: taskCountMessage }),
@@ -83,6 +90,7 @@ export const CleaningTask = Schema.Struct({
   report: Schema.String,
   completed_at: Schema.NullOr(Schema.String),
   completed_by: Schema.NullOr(Schema.String),
+  position: Schema.NullOr(Schema.Number),
   total: Schema.Number,
   handled: Schema.Number,
   issues: Schema.Number,

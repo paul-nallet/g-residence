@@ -77,6 +77,102 @@ function CleaningTabs({ current }: { current: 'planning' | 'templates' }) {
   )
 }
 
+type Row = { key: string; kind: CleaningItemKind; label: string }
+
+function PointRows({
+  title,
+  description,
+  empty,
+  rows,
+  setRows,
+}: {
+  title: string
+  description?: string
+  empty: string
+  rows: readonly Row[]
+  setRows: (update: (current: Row[]) => Row[]) => void
+}) {
+  const add = (kind: CleaningItemKind) =>
+    setRows((current) => [...current, { key: crypto.randomUUID(), kind, label: '' }])
+  const change = (key: string, patch: Partial<Row>) =>
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
+  const move = (index: number, offset: number) =>
+    setRows((current) => {
+      const next = [...current]
+      const [row] = next.splice(index, 1)
+      next.splice(index + offset, 0, row!)
+      return next
+    })
+  return (
+    <VStack gap={3}>
+      <VStack gap={1}>
+        <Heading level={3}>{title}</Heading>
+        {description && <Text color="secondary">{description}</Text>}
+      </VStack>
+      {rows.length === 0 && <Text color="secondary">{empty}</Text>}
+      {rows.map((row, index) => (
+        <HStack key={row.key} gap={2} vAlign="center">
+          <Selector
+            label={'Type du point ' + (index + 1)}
+            isLabelHidden
+            value={row.kind}
+            onChange={(value) => change(row.key, { kind: value as CleaningItemKind })}
+            options={[
+              { value: 'task', label: 'À faire' },
+              { value: 'check', label: 'À vérifier' },
+            ]}
+          />
+          <StackItem size="fill">
+            <TextInput
+              label={'Intitulé du point ' + (index + 1)}
+              isLabelHidden
+              width="100%"
+              value={row.label}
+              onChange={(value) => change(row.key, { label: value })}
+              hasAutoFocus={!row.label && index === rows.length - 1}
+              placeholder={row.kind === 'task' ? 'Aspirer les sols' : 'Ampoules fonctionnelles'}
+            />
+          </StackItem>
+          <IconButton
+            label={'Monter le point ' + (index + 1)}
+            icon={<Icon icon={ArrowUp} />}
+            variant="ghost"
+            isDisabled={index === 0}
+            onClick={() => move(index, -1)}
+          />
+          <IconButton
+            label={'Descendre le point ' + (index + 1)}
+            icon={<Icon icon={ArrowDown} />}
+            variant="ghost"
+            isDisabled={index === rows.length - 1}
+            onClick={() => move(index, 1)}
+          />
+          <IconButton
+            label={'Supprimer le point ' + (index + 1)}
+            icon={<Icon icon={Trash2} />}
+            variant="ghost"
+            onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
+          />
+        </HStack>
+      ))}
+      <HStack gap={2} wrap="wrap">
+        <Button label="Ajouter une tâche à faire" onClick={() => add('task')} />
+        <Button label="Ajouter une vérification" onClick={() => add('check')} />
+      </HStack>
+    </VStack>
+  )
+}
+
+function Lines({ text }: { text: string }) {
+  return (
+    <VStack gap={1}>
+      {text.split('\n').map((line, index) => (
+        <Text key={index}>{line || '\u00a0'}</Text>
+      ))}
+    </VStack>
+  )
+}
+
 function PlanEditor({
   options,
   day,
@@ -99,14 +195,18 @@ function PlanEditor({
     [date, setDate] = useState(day),
     [template, setTemplate] = useState(''),
     [priority, setPriority] = useState<Priority>('normal'),
-    [note, setNote] = useState('')
+    [note, setNote] = useState(''),
+    [rows, setRows] = useState<Row[]>([])
   const mutation = useMutation()
   const fallback = options.templates.find((item) => item.is_default)
   const applied = (lotId: string) => {
-    if (template === 'none') return 'sans checklist'
+    const extra = rows.length ? plural(rows.length, 'point ajouté', 'points ajoutés') : ''
     const lot = options.lots.find((item) => item.id === lotId)
-    const chosen = options.templates.find((item) => item.id === (template || lot?.template_id || fallback?.id || ''))
-    return chosen ? chosen.name : 'sans checklist'
+    const chosen =
+      template === 'none'
+        ? undefined
+        : options.templates.find((item) => item.id === (template || lot?.template_id || fallback?.id || ''))
+    return chosen ? chosen.name + (extra ? ' + ' + extra : '') : extra || 'sans checklist'
   }
   return (
     <Editor
@@ -115,13 +215,21 @@ function PlanEditor({
       close={close}
       busy={mutation.busy}
       error={mutation.error}
-      disabled={!lots.length || !agent || !date}
+      disabled={!lots.length || !agent || !date || rows.some((row) => !row.label.trim())}
       submit={() =>
         void mutation.run(
           () =>
             call((client) =>
               client.cleaning.create({
-                payload: { lot_ids: lots, agent_id: agent, day: date, template_id: template, note, priority },
+                payload: {
+                  lot_ids: lots,
+                  agent_id: agent,
+                  day: date,
+                  template_id: template,
+                  note,
+                  priority,
+                  items: rows.map(({ kind, label }) => ({ kind, label })),
+                },
               }),
             ),
           () => saved(lots.length),
@@ -160,7 +268,7 @@ function PlanEditor({
         options={[
           { value: 'lot', label: 'Fiche habituelle de chaque lot' },
           ...options.templates.map((item) => ({ value: item.id, label: item.name })),
-          { value: 'none', label: 'Sans checklist' },
+          { value: 'none', label: 'Sans fiche : saisir la checklist ci-dessous' },
         ]}
       />
       {!fallback && template === '' && lots.some((id) => !options.lots.find((item) => item.id === id)?.template_id) && (
@@ -180,11 +288,24 @@ function PlanEditor({
             .join(' · ')}
         </Text>
       )}
+      <PointRows
+        title={template === 'none' ? 'Checklist de la tâche' : 'Points supplémentaires'}
+        description={
+          template === 'none'
+            ? 'Ce que l’agent doit faire ou vérifier dans ce lot ; chaque point se coche à la réalisation.'
+            : 'Ajoutés à la fiche pour ce ménage uniquement ; la fiche n’est pas modifiée.'
+        }
+        empty={template === 'none' ? 'Aucun point : la tâche sera planifiée sans checklist.' : 'Aucun point ajouté.'}
+        rows={rows}
+        setRows={setRows}
+      />
       <TextArea
         label="Consigne pour l’agent"
+        description="Information libre affichée en tête de la tâche, sans case à cocher."
         value={note}
         onChange={setNote}
         isOptional
+        rows={4}
         placeholder="Clés à l’accueil, départ à 10 h…"
       />
     </Editor>
@@ -263,16 +384,92 @@ function RescheduleEditor({
   )
 }
 
+function OrderEditor({
+  date,
+  tasks,
+  close,
+  saved,
+}: {
+  date: string
+  tasks: readonly CleaningTask[]
+  close: () => void
+  saved: () => void
+}) {
+  const [list, setList] = useState([...tasks])
+  const mutation = useMutation()
+  const move = (index: number, offset: number) =>
+    setList((current) => {
+      const next = [...current]
+      const [task] = next.splice(index, 1)
+      next.splice(index + offset, 0, task!)
+      return next
+    })
+  return (
+    <Editor
+      title={'Ordre de passage du ' + dayLabel(date)}
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error}
+      submit={() =>
+        void mutation.run(
+          () =>
+            call((client) => client.cleaning.order({ payload: { day: date, task_ids: list.map((task) => task.id) } })),
+          saved,
+        )
+      }
+    >
+      <Text color="secondary">
+        Les ménages prévus s’affichent dans cet ordre pour les agents. Un ménage reporté perd sa place.
+      </Text>
+      <List hasDividers>
+        {list.map((task, index) => {
+          const label = lotLabel({ number: task.lot_number, building_name: task.building_name })
+          return (
+            <ListItem
+              key={task.id}
+              label={index + 1 + '. ' + label}
+              description={task.agent_name + ' · ' + (task.template_name || 'Sans fiche')}
+              endContent={
+                <HStack gap={1} vAlign="center">
+                  <PriorityToken priority={task.priority} />
+                  <IconButton
+                    label={'Avancer ' + label}
+                    icon={<Icon icon={ArrowUp} />}
+                    variant="ghost"
+                    isDisabled={index === 0}
+                    onClick={() => move(index, -1)}
+                  />
+                  <IconButton
+                    label={'Reculer ' + label}
+                    icon={<Icon icon={ArrowDown} />}
+                    variant="ghost"
+                    isDisabled={index === list.length - 1}
+                    onClick={() => move(index, 1)}
+                  />
+                </HStack>
+              }
+            />
+          )
+        })}
+      </List>
+    </Editor>
+  )
+}
+
 function TaskList({
   date,
   tasks,
   reschedule,
+  order,
 }: {
   date: string
   tasks: readonly CleaningTask[]
   reschedule?: (date: string, tasks: readonly CleaningTask[]) => void
+  order?: (date: string, tasks: readonly CleaningTask[]) => void
 }) {
   const movable = tasks.filter((task) => task.status === 'planned')
+  const rank = (task: CleaningTask) =>
+    task.status === 'planned' && task.position !== null ? movable.indexOf(task) + 1 + '. ' : ''
   return (
     <List
       hasDividers
@@ -282,14 +479,24 @@ function TaskList({
             <Heading level={2}>{dayLabel(date)}</Heading>
             {date === today() && <Token label="Aujourd’hui" color="blue" size="sm" />}
           </HStack>
-          {reschedule && movable.length > 0 && (
-            <Button
-              label="Reporter"
-              aria-label={'Reporter des ménages du ' + dayLabel(date)}
-              size="sm"
-              onClick={() => reschedule(date, movable)}
-            />
-          )}
+          <HStack gap={2} wrap="wrap">
+            {order && movable.length > 1 && (
+              <Button
+                label="Ordonner"
+                aria-label={'Ordonner les ménages du ' + dayLabel(date)}
+                size="sm"
+                onClick={() => order(date, movable)}
+              />
+            )}
+            {reschedule && movable.length > 0 && (
+              <Button
+                label="Reporter"
+                aria-label={'Reporter des ménages du ' + dayLabel(date)}
+                size="sm"
+                onClick={() => reschedule(date, movable)}
+              />
+            )}
+          </HStack>
         </HStack>
       }
     >
@@ -297,7 +504,7 @@ function TaskList({
         tasks.map((task) => (
           <ListItem
             key={task.id}
-            label={lotLabel({ number: task.lot_number, building_name: task.building_name })}
+            label={rank(task) + lotLabel({ number: task.lot_number, building_name: task.building_name })}
             href={'#cleaning/' + task.id}
             description={[
               task.agent_name,
@@ -447,6 +654,7 @@ export function Cleaning({ me }: { me: Me }) {
     [view, setView] = useHashParam('vue', manager ? 'week' : 'day'),
     [planning, setPlanning] = useState(false),
     [moving, setMoving] = useState<{ date: string; tasks: readonly CleaningTask[] } | null>(null),
+    [ordering, setOrdering] = useState<{ date: string; tasks: readonly CleaningTask[] } | null>(null),
     [success, setSuccess] = useState('')
   const week = view === 'week',
     from = week ? monday(date) : date,
@@ -469,6 +677,9 @@ export function Cleaning({ me }: { me: Me }) {
   const issues = active.reduce((sum, task) => sum + task.issues, 0)
   const reschedule = manager
     ? (day: string, list: readonly CleaningTask[]) => setMoving({ date: day, tasks: list })
+    : undefined
+  const order = manager
+    ? (day: string, list: readonly CleaningTask[]) => setOrdering({ date: day, tasks: list })
     : undefined
   return (
     <PageLayout
@@ -549,13 +760,31 @@ export function Cleaning({ me }: { me: Me }) {
       {!result.data ? (
         <Loading error={result.error} retry={() => void result.refresh()} />
       ) : !week ? (
-        <TaskList date={date} tasks={tasks} reschedule={reschedule} />
+        <TaskList date={date} tasks={tasks} reschedule={reschedule} order={order} />
       ) : tasks.length ? (
         [...new Set(tasks.map((task) => task.day))].map((day) => (
-          <TaskList key={day} date={day} tasks={tasks.filter((task) => task.day === day)} reschedule={reschedule} />
+          <TaskList
+            key={day}
+            date={day}
+            tasks={tasks.filter((task) => task.day === day)}
+            reschedule={reschedule}
+            order={order}
+          />
         ))
       ) : (
         <Text>Aucun ménage prévu cette semaine.</Text>
+      )}
+      {ordering && (
+        <OrderEditor
+          date={ordering.date}
+          tasks={ordering.tasks}
+          close={() => setOrdering(null)}
+          saved={() => {
+            setOrdering(null)
+            setSuccess('Ordre de passage enregistré pour le ' + dayLabel(ordering.date) + '.')
+            void result.refresh()
+          }}
+        />
       )}
       {moving && (
         <RescheduleEditor
@@ -641,7 +870,7 @@ function PointEditor({ taskId, close, saved }: { taskId: string; close: () => vo
   const mutation = useMutation()
   return (
     <Editor
-      title="Ajouter un point à cette tâche"
+      title="Ajouter à la checklist de cette tâche"
       close={close}
       busy={mutation.busy}
       error={mutation.error}
@@ -662,8 +891,15 @@ function PointEditor({ taskId, close, saved }: { taskId: string; close: () => vo
           { value: 'check', label: 'À vérifier' },
         ]}
       />
-      <TextInput label="Intitulé" value={label} onChange={setLabel} isRequired hasAutoFocus />
-      <Text color="secondary">Le point est ajouté à cette tâche uniquement ; la fiche n’est pas modifiée.</Text>
+      <TextInput
+        label="Intitulé"
+        value={label}
+        onChange={setLabel}
+        isRequired
+        hasAutoFocus
+        placeholder={kind === 'task' ? 'Aspirer les sols' : 'Ampoules fonctionnelles'}
+      />
+      <Text color="secondary">Ajouté à cette tâche uniquement ; la fiche n’est pas modifiée.</Text>
     </Editor>
   )
 }
@@ -874,7 +1110,6 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
                 isDisabled={mutation.busy || !options.data}
                 items={[
                   { label: 'Modifier la tâche', onClick: () => setDialog('edit') },
-                  { label: 'Ajouter un point', onClick: () => setDialog('point') },
                   { type: 'divider' },
                   { label: 'Annuler la tâche', variant: 'destructive', onClick: () => setDialog('cancel') },
                 ]}
@@ -887,6 +1122,9 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
               <Button label="Rétablir" isLoading={mutation.busy} onClick={() => status('planned', 'Tâche rétablie.')} />
             )}
             <Button label="Voir le lot" href={'#lots/' + task.lot_id} />
+            {manager && editable && (
+              <Button label="Ajouter à la checklist" isDisabled={mutation.busy} onClick={() => setDialog('point')} />
+            )}
             {editable && (
               <Button
                 label="Terminer"
@@ -904,7 +1142,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
       {task.note && (
         <VStack gap={1}>
           <Heading level={2}>Consigne</Heading>
-          <Text>{task.note}</Text>
+          <Lines text={task.note} />
         </VStack>
       )}
       {task.status === 'done' && task.completed_at && (
@@ -950,7 +1188,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
         />
       )}
       {dialog === 'point' && (
-        <PointEditor taskId={task.id} close={() => setDialog(null)} saved={() => refreshed('Point ajouté.')} />
+        <PointEditor taskId={task.id} close={() => setDialog(null)} saved={() => refreshed('Ajouté à la checklist.')} />
       )}
       {dialog === 'finish' && (
         <FinishEditor task={task} close={() => setDialog(null)} saved={() => refreshed('Ménage terminé.')} />
@@ -974,8 +1212,6 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
   )
 }
 
-type Row = { key: string; kind: CleaningItemKind; label: string }
-
 function TemplateEditor({
   template,
   options,
@@ -992,17 +1228,6 @@ function TemplateEditor({
     [rows, setRows] = useState<Row[]>((template?.items ?? []).map((item) => ({ ...item, key: crypto.randomUUID() }))),
     [lots, setLots] = useState<string[]>([...(template?.lot_ids ?? [])])
   const mutation = useMutation()
-  const add = (kind: CleaningItemKind) =>
-    setRows((current) => [...current, { key: crypto.randomUUID(), kind, label: '' }])
-  const change = (key: string, patch: Partial<Row>) =>
-    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-  const move = (index: number, offset: number) =>
-    setRows((current) => {
-      const next = [...current]
-      const [row] = next.splice(index, 1)
-      next.splice(index + offset, 0, row!)
-      return next
-    })
   const elsewhere = (lotId: string) =>
     options.templates.find((item) => item.id !== template?.id && item.lot_ids.includes(lotId))
   return (
@@ -1043,58 +1268,12 @@ function TemplateEditor({
         value={isDefault}
         onChange={setIsDefault}
       />
-      <VStack gap={3}>
-        <Heading level={3}>Points de la fiche</Heading>
-        {rows.length === 0 && <Text color="secondary">Ajoutez les tâches à faire et les points à vérifier.</Text>}
-        {rows.map((row, index) => (
-          <HStack key={row.key} gap={2} vAlign="center">
-            <Selector
-              label={'Type du point ' + (index + 1)}
-              isLabelHidden
-              value={row.kind}
-              onChange={(value) => change(row.key, { kind: value as CleaningItemKind })}
-              options={[
-                { value: 'task', label: 'À faire' },
-                { value: 'check', label: 'À vérifier' },
-              ]}
-            />
-            <StackItem size="fill">
-              <TextInput
-                label={'Intitulé du point ' + (index + 1)}
-                isLabelHidden
-                width="100%"
-                value={row.label}
-                onChange={(value) => change(row.key, { label: value })}
-                placeholder={row.kind === 'task' ? 'Aspirer les sols' : 'Ampoules fonctionnelles'}
-              />
-            </StackItem>
-            <IconButton
-              label={'Monter le point ' + (index + 1)}
-              icon={<Icon icon={ArrowUp} />}
-              variant="ghost"
-              isDisabled={index === 0}
-              onClick={() => move(index, -1)}
-            />
-            <IconButton
-              label={'Descendre le point ' + (index + 1)}
-              icon={<Icon icon={ArrowDown} />}
-              variant="ghost"
-              isDisabled={index === rows.length - 1}
-              onClick={() => move(index, 1)}
-            />
-            <IconButton
-              label={'Supprimer le point ' + (index + 1)}
-              icon={<Icon icon={Trash2} />}
-              variant="ghost"
-              onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
-            />
-          </HStack>
-        ))}
-        <HStack gap={2} wrap="wrap">
-          <Button label="Ajouter une tâche" onClick={() => add('task')} />
-          <Button label="Ajouter une vérification" onClick={() => add('check')} />
-        </HStack>
-      </VStack>
+      <PointRows
+        title="Points de la fiche"
+        empty="Ajoutez les tâches à faire et les points à vérifier."
+        rows={rows}
+        setRows={setRows}
+      />
       <MultiSelector
         label="Lots utilisant cette fiche"
         description="Un lot n’a qu’une fiche spécifique : le choisir ici le retire de son ancienne fiche."
