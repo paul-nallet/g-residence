@@ -26,6 +26,12 @@ export const sectionPages: Partial<Record<string, readonly { id: string; label: 
     { id: '', label: 'Planning' },
     { id: 'fiches', label: 'Fiches', managerOnly: true },
   ],
+  technical: [
+    { id: '', label: 'Travaux' },
+    { id: 'signalements', label: 'Signalements' },
+    { id: 'fournisseurs', label: 'Fournisseurs' },
+    { id: 'lieux', label: 'Lieux' },
+  ],
 }
 
 export const sections = [
