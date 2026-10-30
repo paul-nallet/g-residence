@@ -31,8 +31,12 @@ import { Event, Report } from '../domain/agenda.ts'
 import {
   CleaningItemInput,
   CleaningOptions,
-  CleaningPoint,
-  CleaningReschedule,
+  CleaningBulk,
+  CleaningBulkResult,
+  CleaningCheckAll,
+  CleaningChecklist,
+  CleaningCreated,
+  CleaningMovements,
   CleaningOrder,
   CleaningStatusInput,
   CleaningTask,
@@ -537,10 +541,19 @@ export class CleaningGroup extends HttpApiGroup.make('cleaning')
       success: CleaningTaskPage,
       error: errors,
     }),
-    HttpApiEndpoint.post('create', '/cleaning/tasks', { payload: CleaningTaskCreate, success: Ok, error: errors }),
-    HttpApiEndpoint.post('reschedule', '/cleaning/tasks/reschedule', {
-      payload: CleaningReschedule,
-      success: Ok,
+    HttpApiEndpoint.post('create', '/cleaning/tasks', {
+      payload: CleaningTaskCreate,
+      success: CleaningCreated,
+      error: errors,
+    }),
+    HttpApiEndpoint.get('movements', '/cleaning/movements', {
+      query: { day: CivilDate },
+      success: CleaningMovements,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('bulk', '/cleaning/tasks/bulk', {
+      payload: CleaningBulk,
+      success: CleaningBulkResult,
       error: errors,
     }),
     HttpApiEndpoint.post('order', '/cleaning/tasks/order', { payload: CleaningOrder, success: Ok, error: errors }),
@@ -557,9 +570,15 @@ export class CleaningGroup extends HttpApiGroup.make('cleaning')
       success: Ok,
       error: errors,
     }),
-    HttpApiEndpoint.post('addItem', '/cleaning/tasks/:id/items', {
+    HttpApiEndpoint.put('checklist', '/cleaning/tasks/:id/items', {
       params: id,
-      payload: CleaningPoint,
+      payload: CleaningChecklist,
+      success: Ok,
+      error: errors,
+    }),
+    HttpApiEndpoint.post('checkAll', '/cleaning/tasks/:id/items/done', {
+      params: id,
+      payload: CleaningCheckAll,
       success: Ok,
       error: errors,
     }),
@@ -569,7 +588,6 @@ export class CleaningGroup extends HttpApiGroup.make('cleaning')
       success: Ok,
       error: errors,
     }),
-    HttpApiEndpoint.delete('removeItem', '/cleaning/items/:id', { params: id, success: Ok, error: errors }),
   )
   .middleware(Authorization) {}
 const Created = Schema.Struct({ id: Schema.String })

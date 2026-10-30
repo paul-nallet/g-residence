@@ -54,20 +54,35 @@ export const CleaningTaskCreate = Schema.Struct({
   items: Schema.optionalKey(CleaningPoints('Soixante points au maximum par tâche.')),
 })
 const taskCountMessage = 'Choisissez entre 1 et 100 tâches.'
-export const CleaningReschedule = Schema.Struct({
-  task_ids: Schema.Array(Schema.String).check(
-    Schema.isMinLength(1, { message: taskCountMessage }),
-    Schema.isMaxLength(100, { message: taskCountMessage }),
-  ),
-  day: CivilDate,
+const TaskIds = Schema.Array(Schema.String).check(
+  Schema.isMinLength(1, { message: taskCountMessage }),
+  Schema.isMaxLength(100, { message: taskCountMessage }),
+)
+export const CleaningCreated = Schema.Struct({ created: Schema.Number, skipped: Schema.Array(Schema.String) })
+export const CleaningBulk = Schema.Struct({
+  task_ids: TaskIds,
+  agent_id: Schema.optionalKey(Schema.String),
+  day: Schema.optionalKey(CivilDate),
+  priority: Schema.optionalKey(Priority),
+  cancel: Schema.optionalKey(Schema.Boolean),
+  items: Schema.optionalKey(CleaningPoints('Soixante points au maximum par ajout.')),
 })
-export const CleaningOrder = Schema.Struct({
-  task_ids: Schema.Array(Schema.String).check(
-    Schema.isMinLength(1, { message: taskCountMessage }),
-    Schema.isMaxLength(100, { message: taskCountMessage }),
-  ),
-  day: CivilDate,
+export const CleaningBulkResult = Schema.Struct({ updated: Schema.Number, skipped: Schema.Number })
+export const CleaningChecklist = Schema.Struct({
+  items: Schema.Array(
+    Schema.Struct({
+      id: Schema.optionalKey(Schema.String),
+      kind: CleaningItemKind,
+      label: RequiredText('Intitulé du point', 160),
+    }),
+  ).check(Schema.isMaxLength(60, { message: 'Soixante points au maximum par tâche.' })),
 })
+export const CleaningCheckAll = Schema.Struct({ kind: CleaningItemKind })
+export const CleaningMovements = Schema.Struct({
+  departures: Schema.Array(Schema.String),
+  arrivals: Schema.Array(Schema.String),
+})
+export const CleaningOrder = Schema.Struct({ task_ids: TaskIds, day: CivilDate })
 export const CleaningTaskInput = Schema.Struct({
   agent_id: Schema.String,
   day: CivilDate,

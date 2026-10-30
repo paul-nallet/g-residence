@@ -55,7 +55,7 @@ const make = Effect.gen(function* () {
       scope = lotId ? [me.residenceId, lotId] : [me.residenceId]
     const hidden = me.role === 'cleaner'
     const window = [addDays(from, -1) + 'T00:00:00.000Z', addDays(to, 1) + 'T23:00:00.000Z'] as const
-    const [stays, inspections, interventions, visits] = yield* Effect.all([
+    const [stays, inspections, interventions, visits, cleaning] = yield* Effect.all([
       db.all<Stay & { number: string }>(
         sql(
           `SELECT s.*,l.number FROM stays s JOIN lots l ON l.id=s.lot_id WHERE s.residence_id=? AND s.cancelled=0 ${restriction} AND (s.planned_start BETWEEN ? AND ? OR s.planned_end BETWEEN ? AND ?)`,
@@ -99,6 +99,19 @@ const make = Effect.gen(function* () {
               to,
             ),
           ),
+      hidden
+        ? db.all<{ id: string; lot_id: string; number: string; day: string; status: string; note: string }>(
+            sql(
+              `SELECT t.id,t.lot_id,l.number,t.day,t.status,t.note FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id
+              WHERE t.residence_id=? AND t.agent_id=? AND t.status<>'cancelled' AND t.day BETWEEN ? AND ? ${restriction}`,
+              me.residenceId,
+              me.id,
+              from,
+              to,
+              ...(lotId ? [lotId] : []),
+            ),
+          )
+        : Effect.succeed([]),
     ])
     const events: Event[] = [
       ...stays.flatMap((stay) => stayEvents(stay, from, to, hidden)),
@@ -140,6 +153,19 @@ const make = Effect.gen(function* () {
         comment: visit.report,
         title: visit.name,
         place: visit.building,
+      })
+    for (const task of cleaning)
+      events.push({
+        id: task.id,
+        kind: 'cleaning',
+        lotId: task.lot_id,
+        lotNumber: task.number,
+        date: task.day,
+        time: '',
+        duration: 0,
+        status: task.status,
+        resident: '',
+        comment: task.note,
       })
     return sortEvents(events)
   })

@@ -47,6 +47,7 @@ import { Feedback, Loading, roleLabels } from '../features/status.tsx'
 import { call, SESSION_EXPIRED } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { CommandBar } from '../command/CommandBar.tsx'
+import { useMobile } from '../lib/useMobile.ts'
 import { useCrumb } from './crumb.ts'
 import { PageLayout } from './PageLayout.tsx'
 import { navGroups, sections } from './sections.ts'
@@ -65,7 +66,8 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
     mutation = useMutation(),
     [isNavCollapsed, setIsNavCollapsed] = useState(false),
     [isStudioOpen, setIsStudioOpen] = useState(false),
-    crumb = useCrumb()
+    crumb = useCrumb(),
+    mobile = useMobile()
   const { refresh: refreshAuth } = auth
   useEffect(() => {
     const expired = () => void refreshAuth()
@@ -263,8 +265,10 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
                     onClick={() => history.back()}
                   />
                   <Breadcrumbs label="Rubrique actuelle" variant="supporting">
-                    <BreadcrumbItem href="#overview">{me.residenceName}</BreadcrumbItem>
-                    {(id || query) && crumb ? (
+                    {!mobile && <BreadcrumbItem href="#overview">{me.residenceName}</BreadcrumbItem>}
+                    {(id || query) && crumb && mobile ? (
+                      <BreadcrumbItem isCurrent>{crumb}</BreadcrumbItem>
+                    ) : (id || query) && crumb ? (
                       <>
                         <BreadcrumbItem href={'#' + section.id}>{section.label}</BreadcrumbItem>
                         <BreadcrumbItem isCurrent>{crumb}</BreadcrumbItem>
@@ -277,15 +281,19 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
               }
               endContent={
                 <>
-                  <Button
-                    label={isStudioOpen ? 'Fermer AI Studio' : 'Ouvrir AI Studio'}
-                    variant={isStudioOpen ? 'secondary' : 'ghost'}
-                    isIconOnly
-                    icon={<Icon icon={Sparkles} />}
-                    onClick={() => setIsStudioOpen((open) => !open)}
-                  />
-                  <CommandBar me={me} destinations={visible} />
-                  <ThemeSelector mode={themeMode} onChange={onThemeChange} />
+                  {!mobile && (
+                    <>
+                      <Button
+                        label={isStudioOpen ? 'Fermer AI Studio' : 'Ouvrir AI Studio'}
+                        variant={isStudioOpen ? 'secondary' : 'ghost'}
+                        isIconOnly
+                        icon={<Icon icon={Sparkles} />}
+                        onClick={() => setIsStudioOpen((open) => !open)}
+                      />
+                      <CommandBar me={me} destinations={visible} />
+                      <ThemeSelector mode={themeMode} onChange={onThemeChange} />
+                    </>
+                  )}
                   <MoreMenu
                     label={'Compte de ' + me.name + ' · ' + roleLabels[me.role]}
                     icon={<Icon icon={UserRound} />}
@@ -316,7 +324,7 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
         }
         content={<Suspense fallback={<PageLoading />}>{content}</Suspense>}
         end={
-          isStudioOpen ? (
+          isStudioOpen && !mobile ? (
             <LayoutPanel hasDivider width={400} padding={0} isScrollable={false} role="complementary" label="AI Studio">
               <Suspense fallback={<PageLoading />}>
                 <Studio route={route} onClose={() => setIsStudioOpen(false)} />

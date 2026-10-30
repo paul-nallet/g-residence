@@ -26,6 +26,7 @@ Navigation initiale : Vue d'ensemble, Lots et mouvements, Calendrier, Ménage, T
 - Export de recettes : source, période, montant, devise et convention HT/TTC explicites.
 - Pas de faux chiffres, de rendez-vous inventés ou de boutons de saisie sans action.
 - Accessible au clavier, focus visible, icônes nommées, erreurs proches de la saisie, navigation mobile explicite.
+- Sur téléphone (moins de 768 px) : barre supérieure réduite au retour, à la rubrique courante et au compte (ni recherche, ni thème, ni AI Studio) ; formulaires en plein écran avec bouton principal pleine largeur ; contrôles agrandis sous le doigt par une adaptation du thème (`pointer: coarse`) ; tableaux denses remplacés par des listes lorsqu’ils portent une action.
 
 ## Construction
 

@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "frontend", "test", "vite.config.ts", "worker-configuration.d.ts"]
+  "include": ["src", "frontend", "scripts", "test", "vite.config.ts", "worker-configuration.d.ts"]
 }

@@ -67,7 +67,7 @@ Tableau paginé côté API, copie de toute la semaine avec en-têtes Date, Modul
 | --- | --- | --- |
 | Comptes | Livré | Rôles administrateur, gestionnaire et ménage ; invitations par lien. |
 | Lots et mouvements | Livré | Bâtiments, lots, séjours, préavis, états des lieux, historique. |
-| Calendrier | Livré | États des lieux et interventions techniques, semaine, mois et jour. |
+| Calendrier | Livré | États des lieux et interventions techniques, semaine, mois et jour ; tâches de ménage de l’agent connecté. |
 | Reporting | Livré | Bilan hebdomadaire transversal, tableau paginé et copie Excel complète. |
 | Relevés | Livré | Compteurs des communs, index mensuels, récapitulatif annuel. |
 | Stock | Livré | Articles, catégories, vues, mouvements et alertes de stock faible. |
@@ -148,7 +148,9 @@ Fiches modèles réservées aux administrateurs et gestionnaires : nom unique, p
 
 Une tâche relie un lot actif, un agent (membre actif de l’équipe, quel que soit son rôle) et un jour civil, avec une consigne facultative. Plusieurs lots peuvent être planifiés en une fois ; un lot n’a qu’une tâche non annulée par jour. États prévu, réalisé et annulé ; seule une tâche prévue se modifie. Chaque point est à faire, fait (ou conforme) ou signalé non fait (ou en anomalie) avec un constat facultatif, avec auteur et heure. Terminer exige que chaque point soit traité, enregistre auteur, heure et commentaire. Les gestionnaires peuvent annuler, rouvrir ou rétablir une tâche.
 
-L’agent de ménage ne voit que ses propres tâches, en vue jour par défaut, et ne gère ni les fiches ni le planning. Les gestionnaires voient le planning par jour ou semaine, filtrable par agent. Les ménages réalisés figurent au bilan hebdomadaire des gestionnaires, avec leur commentaire et leurs points signalés. Hors périmètre : rattachement automatique au stock, création de signalement technique depuis une anomalie et récurrence automatique du planning.
+Révision du 30 octobre 2026 : planification et modification en masse. Le planning gestionnaire coche des tâches prévues (par ligne, par jour ou toute la période) pour les réaffecter, changer leur jour, leur priorité, leur ajouter des points ou les annuler en une fois ; les tâches terminées ou annulées sont ignorées et comptées. La planification propose les sorties et entrées du jour et les lots par bâtiment, montre la checklist réellement appliquée à chaque lot et ignore, en les nommant, les lots déjà planifiés ce jour-là. L’agent proposé par défaut est un compte Ménage : le dernier choisi sur cet appareil, sinon le premier ; sans compte Ménage, le champ reste à choisir et un avertissement l’indique. La checklist d’une tâche prévue se modifie en place (libellés, ordre, ajout, retrait) ; un point qui change de section repart à faire. Une checklist peut être enregistrée comme fiche et une fiche dupliquée.
+
+L’agent de ménage ne voit que ses propres tâches dans « Ma journée » : ses lots prévus dans l’ordre de passage, le prochain mis en avant, puis les lots terminés. Chaque point se coche par deux boutons visibles (fait ou conforme, non fait ou anomalie), « Tout marquer fait » et « Tout marquer conforme » traitent les points restants d’une section, et après « Terminer » l’agent passe au lot suivant de sa journée. Ses tâches non annulées apparaissent aussi dans son calendrier. Il ne gère ni les fiches ni le planning. Les gestionnaires voient le planning par jour ou semaine, filtrable par agent. Les ménages réalisés figurent au bilan hebdomadaire des gestionnaires, avec leur commentaire et leurs points signalés. Hors périmètre : rattachement automatique au stock, création de signalement technique depuis une anomalie et récurrence automatique du planning.
 
 
 ## Technique : lieux, fournisseurs, signalements et travaux
