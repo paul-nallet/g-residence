@@ -74,8 +74,8 @@ const movementStatements = (me: Me, at: string, itemId: string, input: typeof Mo
   const delta = movementDelta(input.kind, input.quantity)
   return [
     sql(
-      `INSERT INTO stock_movements(id,residence_id,item_id,kind,delta,quantity_after,occurred_on,comment,actor_id,created_at)
-      SELECT ?,residence_id,id,?,COALESCE(?,?-quantity),COALESCE(quantity+?,?),?,?,?,? FROM stock_items WHERE id=? AND residence_id=?`,
+      `INSERT INTO stock_movements(id,residence_id,item_id,kind,delta,quantity_after,occurred_on,comment,actor_id,created_at,cleaning_task_id)
+      SELECT ?,residence_id,id,?,COALESCE(?,?-quantity),COALESCE(quantity+?,?),?,?,?,?,? FROM stock_items WHERE id=? AND residence_id=?`,
       crypto.randomUUID(),
       input.kind,
       delta,
@@ -86,6 +86,7 @@ const movementStatements = (me: Me, at: string, itemId: string, input: typeof Mo
       input.comment,
       me.id,
       at,
+      input.cleaning_task_id ?? null,
       itemId,
       me.residenceId,
     ),
@@ -322,7 +323,7 @@ const make = Effect.gen(function* () {
     const [items, count] = yield* Effect.all([
       db.all<Movement>(
         sql(
-          `SELECT m.id,m.kind,m.delta,m.quantity_after,m.occurred_on,m.comment,u.name AS actor,m.created_at
+          `SELECT m.id,m.kind,m.delta,m.quantity_after,m.occurred_on,m.comment,u.name AS actor,m.created_at,m.cleaning_task_id
           FROM stock_movements m JOIN users u ON u.id=m.actor_id
           WHERE m.item_id=? AND m.residence_id=? ORDER BY m.rowid DESC LIMIT ? OFFSET ?`,
           id,
@@ -369,6 +370,18 @@ const make = Effect.gen(function* () {
       return yield* new InvalidInput({ message: 'La date du mouvement ne peut pas être dans le futur.' })
     if (input.kind !== 'count' && input.quantity < 1)
       return yield* new InvalidInput({ message: 'Saisissez une quantité d’au moins 1.' })
+    if (input.cleaning_task_id !== undefined) {
+      if (input.kind !== 'out')
+        return yield* new InvalidInput({ message: 'Seule une sortie de stock peut être rattachée à un ménage.' })
+      const task = yield* db.first(
+        sql(
+          "SELECT id FROM cleaning_tasks WHERE id=? AND residence_id=? AND status<>'cancelled'",
+          input.cleaning_task_id,
+          me.residenceId,
+        ),
+      )
+      if (!task) return yield* new InvalidInput({ message: 'Ménage introuvable ou annulé. Rechargez la page.' })
+    }
     if (input.kind === 'count') {
       const latest = yield* db.first<{ day: string | null }>(
         sql(

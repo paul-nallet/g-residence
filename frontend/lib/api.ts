@@ -1,5 +1,5 @@
 import { Effect, Predicate, Schema } from 'effect'
-import { FetchHttpClient } from 'effect/http'
+import { FetchHttpClient, HttpClientError } from 'effect/http'
 import { HttpApiClient } from 'effect/http-api'
 import { Api, issueMessage } from '../../src/api/Api.ts'
 
@@ -16,6 +16,10 @@ export const messageOf = (error: unknown) =>
       : error instanceof Error && !Predicate.hasProperty(error, '_tag')
         ? error.message
         : 'Impossible de contacter le serveur.'
+export class NetworkError extends Error {}
+export const isNetworkError = (error: unknown) => error instanceof NetworkError
+const isTransport = (error: unknown) =>
+  HttpClientError.isHttpClientError(error) && error.reason._tag === 'TransportError'
 export const call = <A, E>(f: (client: Client) => Effect.Effect<A, E>) =>
   Effect.runPromise(
     makeClient.pipe(
@@ -25,6 +29,10 @@ export const call = <A, E>(f: (client: Client) => Effect.Effect<A, E>) =>
           if (Predicate.isTagged(error, 'Unauthorized')) window.dispatchEvent(new Event(SESSION_EXPIRED))
         }),
       ),
-      Effect.mapError((error) => new Error(messageOf(error))),
+      Effect.mapError((error) =>
+        isTransport(error)
+          ? new NetworkError('Connexion impossible : vérifiez le réseau.')
+          : new Error(messageOf(error)),
+      ),
     ),
   )

@@ -11,7 +11,15 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Token } from '@astryxdesign/core/Token'
 import { Link } from '@astryxdesign/core/Link'
-import { type Lot, LotArchiveFilter, type LotRow, LotSort, LotStateFilter } from '../../src/domain/lots.ts'
+import {
+  CleanlinessFilter,
+  type Lot,
+  LotArchiveFilter,
+  type LotRow,
+  LotSort,
+  LotStateFilter,
+} from '../../src/domain/lots.ts'
+import { cleanlinessLabels, CleanlinessToken, hasCleanliness } from './readiness.tsx'
 import type { Me } from '../../src/domain/accounts.ts'
 import { call } from '../lib/api.ts'
 import { useHashPage, useHashParam } from '../lib/hashParams.ts'
@@ -112,16 +120,17 @@ export function Lots({ me }: { me: Me }) {
   const [q, setQ] = useHashParam('q', ''),
     [state, setState] = useHashParam<LotStateFilter>('occupation', 'all'),
     [building, setBuilding] = useHashParam('batiment', 'all'),
+    [cleanliness, setCleanliness] = useHashParam<CleanlinessFilter>('proprete', 'all'),
     [buildingEditor, setBuildingEditor] = useState(false),
     [archived, setArchived] = useHashParam<LotArchiveFilter>('archives', 'no'),
     [sort, setSort] = useHashParam<LotSort>('tri', 'number'),
     [page, setPage] = useHashPage(),
     [editor, setEditor] = useState<Lot | 'new' | null>(null)
   const load = useCallback(
-    () => call((client) => client.lots.list({ query: { q, state, building, archived, sort, page } })),
-    [q, state, building, archived, sort, page],
+    () => call((client) => client.lots.list({ query: { q, state, building, cleanliness, archived, sort, page } })),
+    [q, state, building, cleanliness, archived, sort, page],
   )
-  const result = useQuery(`lots:${q}:${state}:${building}:${archived}:${sort}:${page}`, load)
+  const result = useQuery(`lots:${q}:${state}:${building}:${cleanliness}:${archived}:${sort}:${page}`, load)
   const buildings = useQuery('buildings', loadBuildings)
   const pagination = useTablePagination<LotRow>({
     page,
@@ -189,6 +198,18 @@ export function Lots({ me }: { me: Me }) {
             { value: 'vacant', label: 'Libre' },
             { value: 'planned', label: 'Entrée prévue' },
             { value: 'occupied', label: 'Occupé' },
+          ]}
+        />
+        <Selector
+          label="Propreté"
+          value={cleanliness}
+          onChange={(value) => {
+            setCleanliness(CleanlinessFilter.literals.find((item) => item === value) ?? 'all')
+            setPage(1)
+          }}
+          options={[
+            { value: 'all', label: 'Tous' },
+            ...Object.entries(cleanlinessLabels).map(([value, label]) => ({ value, label })),
           ]}
         />
         <Selector
@@ -276,6 +297,9 @@ export function Lots({ me }: { me: Me }) {
                     ) : (
                       <HStack gap={1} wrap="wrap">
                         <StateToken state={row.occupancy === 'planned' ? 'Entrée prévue' : row.occupancy} />
+                        {row.cleanliness !== 'clean' && hasCleanliness(row) && (
+                          <CleanlinessToken cleanliness={row.cleanliness} />
+                        )}
                         {row.notice ? <Token label="Préavis" color="orange" /> : null}
                         {row.occupancy === 'planned' && row.stay_start && row.stay_start < today() ? (
                           <Token label="Entrée à confirmer" color="red" />

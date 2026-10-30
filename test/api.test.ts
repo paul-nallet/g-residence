@@ -1887,3 +1887,309 @@ test('ménage : points d’étape, validation et demande de reprise par le gesti
     await e.dispose()
   }
 })
+
+test('préparation des lots : propreté suivie des sorties aux validations, entrées prêtes et lots à préparer', async () => {
+  const e = await environment()
+  try {
+    const invite = await e.request('/team/invitations', 'POST', { email: 'pret@example.test', role: 'cleaner' })
+    const { token } = (await invite.json()) as { token: string }
+    const accept = await e.request(
+      '/auth/invitations/' + token,
+      'POST',
+      { name: 'Agent', password: 'Validation-seulement-2026' },
+      '',
+    )
+    const cleaner = accept.headers.get('set-cookie')!.split(';')[0]!
+    const { id: agent } = (await accept.json()) as { id: string }
+    const lot = async (number: string) => {
+      await e.request('/lots', 'POST', { building_id: 'test-building', number, floor: '', type: '' })
+      return (e.sqlite.prepare('SELECT id FROM lots WHERE number=?').get(number) as { id: string }).id
+    }
+    const day = today()
+    const lots = { A: await lot('A'), B: await lot('B') }
+    const stay = async (lotId: string, planned_start: string, planned_end: string | null) => {
+      await e.request('/lots/' + lotId + '/stays', 'POST', {
+        first_name: 'Résident',
+        last_name: lotId,
+        planned_start,
+        planned_end,
+      })
+      return (
+        e.sqlite.prepare('SELECT id FROM stays WHERE lot_id=? ORDER BY planned_start DESC').get(lotId) as {
+          id: string
+        }
+      ).id
+    }
+    const leaving = await stay(lots.A, addDays(day, -30), day)
+    await e.request('/stays/' + leaving + '/actions', 'POST', { action: 'entry', date: addDays(day, -30) })
+    await stay(lots.A, addDays(day, 1), null)
+    await stay(lots.B, day, null)
+    const cleanliness = (id: string) =>
+      (e.sqlite.prepare('SELECT cleanliness FROM lots WHERE id=?').get(id) as { cleanliness: string }).cleanliness
+
+    type Readiness = {
+      arrivals: { number: string; cleanliness: string; arrival: string; task: { status: string } | null }[]
+      to_prepare: { number: string; arrival: string | null; task: { id: string; status: string } | null }[]
+      counts: Record<string, number>
+    }
+    const readiness = async () => (await (await e.request('/cleaning/readiness?day=' + day)).json()) as Readiness
+    assert.equal(cleanliness(lots.A), 'clean')
+    assert.equal((await e.request('/stays/' + leaving + '/actions', 'POST', { action: 'exit', date: day })).status, 200)
+    assert.equal(cleanliness(lots.A), 'dirty')
+    let ready = await readiness()
+    assert.deepEqual(
+      ready.arrivals.map((row) => [row.number, row.cleanliness, row.arrival]),
+      [
+        ['B', 'clean', day],
+        ['A', 'dirty', addDays(day, 1)],
+      ],
+    )
+    assert.deepEqual(
+      ready.to_prepare.map((row) => [row.number, row.arrival, row.task]),
+      [['A', addDays(day, 1), null]],
+    )
+    assert.deepEqual(ready.counts, { dirty: 1, clean: 1, inspected: 0, out_of_service: 0 })
+    assert.equal((await e.request('/cleaning/readiness?day=' + day, 'GET', undefined, cleaner)).status, 403)
+
+    const template = await e.request('/cleaning/templates', 'POST', {
+      name: 'Départ',
+      is_default: false,
+      default_type: 'departure',
+      items: [{ kind: 'task', label: 'Dégivrer le frigo' }],
+      lot_ids: [],
+    })
+    assert.equal(template.status, 200)
+    await e.request('/cleaning/templates', 'POST', {
+      name: 'Courant',
+      is_default: true,
+      items: [{ kind: 'task', label: 'Aspirer' }],
+      lot_ids: [],
+    })
+    const created = await e.request('/cleaning/tasks', 'POST', {
+      type: 'departure',
+      lot_ids: [lots.A],
+      agent_id: agent,
+      day,
+      template_id: '',
+      note: '',
+    })
+    assert.deepEqual(await created.json(), { created: 1, skipped: [] })
+    ready = await readiness()
+    const task = ready.to_prepare[0]!.task!
+    assert.equal(task.status, 'planned')
+    type Detail = {
+      task: { type: string; template_name: string; arrival: boolean; cleanliness: string }
+      items: { id: string; label: string; state: string; issue_id: string | null }[]
+      supplies: { item_name: string; quantity: number }[]
+    }
+    const detail = async (as = e.cookie) =>
+      (await (await e.request('/cleaning/tasks/' + task.id, 'GET', undefined, as)).json()) as Detail
+    let current = await detail()
+    assert.deepEqual(
+      [current.task.type, current.task.template_name, current.items.map((i) => i.label), current.task.cleanliness],
+      ['departure', 'Départ', ['Dégivrer le frigo'], 'dirty'],
+    )
+
+    const at = new Date(Date.now() - 3600_000).toISOString()
+    assert.equal(
+      (
+        await e.request(
+          '/cleaning/items/' + current.items[0]!.id,
+          'PATCH',
+          { state: 'issue', note: 'Joint moisi', at },
+          cleaner,
+        )
+      ).status,
+      200,
+    )
+    assert.equal(
+      (
+        e.sqlite.prepare('SELECT updated_at FROM cleaning_task_items WHERE id=?').get(current.items[0]!.id) as {
+          updated_at: string
+        }
+      ).updated_at,
+      at,
+    )
+    const commentId = crypto.randomUUID()
+    for (let attempt = 0; attempt < 2; attempt++)
+      assert.equal(
+        (
+          await e.request(
+            '/cleaning/tasks/' + task.id + '/comments',
+            'POST',
+            { body: 'Hors ligne', id: commentId, at },
+            cleaner,
+          )
+        ).status,
+        200,
+      )
+    assert.equal(
+      (
+        e.sqlite.prepare('SELECT COUNT(*) AS n FROM cleaning_task_comments WHERE task_id=?').get(task.id) as {
+          n: number
+        }
+      ).n,
+      1,
+    )
+    const future = new Date(Date.now() + 86400_000).toISOString()
+    await e.request(
+      '/cleaning/tasks/' + task.id + '/status',
+      'POST',
+      { status: 'done', report: '', at: future },
+      cleaner,
+    )
+    const completed = (
+      e.sqlite.prepare('SELECT completed_at FROM cleaning_tasks WHERE id=?').get(task.id) as {
+        completed_at: string
+      }
+    ).completed_at
+    assert.ok(completed < future)
+    assert.equal(cleanliness(lots.A), 'clean')
+
+    const offline = (await (await e.request('/cleaning/day?day=' + day, 'GET', undefined, cleaner)).json()) as {
+      tasks: Detail[]
+    }
+    assert.deepEqual(
+      offline.tasks.map((t) => [t.task.type, t.items.length, t.supplies.length]),
+      [['departure', 1, 0]],
+    )
+
+    assert.equal(
+      (await e.request('/cleaning/items/' + current.items[0]!.id + '/issue', 'POST', undefined, cleaner)).status,
+      403,
+    )
+    const issue = await e.request('/cleaning/items/' + current.items[0]!.id + '/issue', 'POST')
+    assert.equal(issue.status, 200)
+    const { id: issueId } = (await issue.json()) as { id: string }
+    const again = (await (await e.request('/cleaning/items/' + current.items[0]!.id + '/issue', 'POST')).json()) as {
+      id: string
+    }
+    assert.equal(again.id, issueId)
+    const issues = (await (await e.request('/technical/issues')).json()) as {
+      items: { id: string; title: string; location: { label: string }; cleaning_task_id: string }[]
+    }
+    assert.deepEqual(
+      issues.items.map((i) => [i.id, i.title, i.location.label, i.cleaning_task_id]),
+      [[issueId, 'Dégivrer le frigo', 'Lot A', task.id]],
+    )
+
+    await e.request('/stock', 'POST', {
+      name: 'Éponge',
+      categories: ['Ménage'],
+      unit: 'pièces',
+      threshold: 1,
+      initial: 5,
+    })
+    const sponge = (e.sqlite.prepare("SELECT id FROM stock_items WHERE name='Éponge'").get() as { id: string }).id
+    const move = (payload: object) =>
+      e.request('/stock/' + sponge + '/movements', 'POST', {
+        quantity: 2,
+        occurred_on: day,
+        comment: 'Lot A',
+        cleaning_task_id: task.id,
+        ...payload,
+      })
+    assert.equal((await move({ kind: 'in' })).status, 400)
+    assert.equal((await move({ kind: 'out', cleaning_task_id: 'absent' })).status, 400)
+    assert.equal((await move({ kind: 'out' })).status, 200)
+    current = await detail()
+    assert.deepEqual(
+      [current.items[0]!.issue_id, current.supplies.map((s) => [s.item_name, s.quantity])],
+      [issueId, [['Éponge', 2]]],
+    )
+    assert.deepEqual((await detail(cleaner)).supplies, [])
+
+    await e.request('/cleaning/tasks/' + task.id + '/review', 'POST', { decision: 'approved', comment: '' })
+    assert.equal(cleanliness(lots.A), 'inspected')
+    assert.equal((await readiness()).arrivals.find((row) => row.number === 'A')!.cleanliness, 'inspected')
+    assert.equal(
+      (await e.request('/cleaning/lots/' + lots.B + '/cleanliness', 'PUT', { cleanliness: 'out_of_service' }, cleaner))
+        .status,
+      403,
+    )
+    assert.equal(
+      (await e.request('/cleaning/lots/' + lots.B + '/cleanliness', 'PUT', { cleanliness: 'out_of_service' })).status,
+      200,
+    )
+    const filtered = (await (await e.request('/lots?cleanliness=out_of_service')).json()) as {
+      items: { number: string }[]
+    }
+    assert.deepEqual(
+      filtered.items.map((row) => row.number),
+      ['B'],
+    )
+    await e.request('/cleaning/tasks/' + task.id + '/status', 'POST', { status: 'planned', report: '' })
+    assert.equal(cleanliness(lots.A), 'dirty')
+  } finally {
+    await e.dispose()
+  }
+})
+
+test('ménage des parties communes : lieux, répétition hebdomadaire, jours déjà pris et calendrier', async () => {
+  const e = await environment()
+  try {
+    const admin = (e.sqlite.prepare("SELECT id FROM users WHERE role='admin'").get() as { id: string }).id
+    const place = (await (
+      await e.request('/technical/places', 'POST', {
+        name: 'Laverie',
+        building_id: 'test-building',
+        description: '',
+        archived: false,
+      })
+    ).json()) as { id: string }
+    await e.request('/cleaning/templates', 'POST', {
+      name: 'Communs',
+      is_default: false,
+      default_type: 'commons',
+      items: [{ kind: 'check', label: 'Filtres des sèche-linge' }],
+      lot_ids: [],
+    })
+    const monday = '2026-11-02'
+    const input = { agent_id: admin, day: monday, template_id: '', note: '', lot_ids: [], place_ids: [place.id] }
+    assert.equal((await e.request('/cleaning/tasks', 'POST', { ...input, place_ids: [] })).status, 400)
+    assert.equal(
+      (await e.request('/cleaning/tasks', 'POST', { ...input, repeat: { weekdays: [1], until: '2027-06-01' } })).status,
+      400,
+    )
+    assert.deepEqual(await (await e.request('/cleaning/tasks', 'POST', { ...input, day: '2026-11-05' })).json(), {
+      created: 1,
+      skipped: [],
+    })
+    const repeated = await e.request('/cleaning/tasks', 'POST', {
+      ...input,
+      repeat: { weekdays: [1, 4], until: '2026-11-15' },
+    })
+    assert.deepEqual(await repeated.json(), { created: 3, skipped: ['Laverie le 05/11'] })
+    const tasks = (await (await e.request('/cleaning/tasks?from=2026-11-01&to=2026-11-15')).json()) as {
+      day: string
+      type: string
+      lot_id: string | null
+      place_name: string
+      building_name: string
+      template_name: string
+    }[]
+    assert.deepEqual(
+      tasks.map((t) => [t.day, t.type, t.lot_id, t.place_name, t.building_name, t.template_name]),
+      [
+        ['2026-11-12', 'commons', null, 'Laverie', 'Bâtiment test', 'Communs'],
+        ['2026-11-09', 'commons', null, 'Laverie', 'Bâtiment test', 'Communs'],
+        ['2026-11-05', 'commons', null, 'Laverie', 'Bâtiment test', 'Communs'],
+        ['2026-11-02', 'commons', null, 'Laverie', 'Bâtiment test', 'Communs'],
+      ],
+    )
+    const options = (await (await e.request('/cleaning/options')).json()) as { places: { name: string }[] }
+    assert.deepEqual(
+      options.places.map((p) => p.name),
+      ['Laverie'],
+    )
+    await e.request('/technical/places/' + place.id, 'PATCH', {
+      name: 'Laverie',
+      building_id: 'test-building',
+      description: '',
+      archived: true,
+    })
+    assert.equal((await e.request('/cleaning/tasks', 'POST', { ...input, day: '2026-11-20' })).status, 400)
+  } finally {
+    await e.dispose()
+  }
+})

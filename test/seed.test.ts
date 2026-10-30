@@ -37,6 +37,7 @@ test('le jeu de démonstration respecte contraintes et triggers et reste lisible
       `/revenue?month=${day.slice(0, 7)}`,
       `/cleaning/tasks?from=${addDays(day, -7)}&to=${addDays(day, 7)}`,
       '/cleaning/templates',
+      `/cleaning/readiness?day=${day}`,
       '/technical/issues',
       '/technical/works',
       '/technical/visits',
@@ -46,5 +47,27 @@ test('le jeu de démonstration respecte contraintes et triggers et reste lisible
       const response = await request(path, { headers: { cookie } })
       assert.equal(response.status, 200, `${path} : ${await response.clone().text()}`)
     }
+    const readiness = (await (await request(`/cleaning/readiness?day=${day}`, { headers: { cookie } })).json()) as {
+      arrivals: { number: string; cleanliness: string; task: { status: string } | null }[]
+      to_prepare: { number: string; task: unknown }[]
+    }
+    assert.deepEqual(
+      readiness.arrivals.map((lot) => [lot.number, lot.cleanliness, lot.task?.status]),
+      [
+        ['A107', 'dirty', 'planned'],
+        ['B05', 'inspected', 'done'],
+      ],
+    )
+    assert.deepEqual(
+      readiness.to_prepare.map((lot) => [lot.number, lot.task]),
+      [
+        ['A107', readiness.to_prepare[0]!.task],
+        ['A305', null],
+      ],
+    )
+    const commons = (await (
+      await request(`/cleaning/tasks?from=${addDays(day, -7)}&to=${addDays(day, 14)}`, { headers: { cookie } })
+    ).json()) as { type: string; place_name: string }[]
+    assert.ok(commons.some((task) => task.type === 'commons' && task.place_name === 'Laverie'))
   }
 })

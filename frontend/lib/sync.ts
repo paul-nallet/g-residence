@@ -1,4 +1,5 @@
-import { call } from './api.ts'
+import { call, isNetworkError } from './api.ts'
+import { reportReachable } from './network.ts'
 
 const ACTIVE_INTERVAL = 10_000
 const IDLE_INTERVAL = 60_000
@@ -33,10 +34,12 @@ export const checkForChanges = async (): Promise<void> => {
   checking = true
   try {
     const state = await call((client) => client.sync.state())
+    reportReachable(true)
     const changed = version !== null && state.version !== version
     version = state.version
     if (changed) for (const listener of listeners) listener()
-  } catch {
+  } catch (error) {
+    if (isNetworkError(error)) reportReachable(false)
     return
   } finally {
     checking = false

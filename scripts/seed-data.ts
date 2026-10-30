@@ -327,6 +327,7 @@ export const seedSql = async (today: string) => {
     { name: 'Piles AA', category: 3, unit: 'paquet', threshold: 4, received: 10, used: 3 },
     { name: 'Joints silicone', category: 3, unit: 'cartouche', threshold: 3, received: 6, used: 4 },
   ]
+  const stockIds: Record<string, { item: string; lastOut: string }> = {}
   for (const item of items) {
     const itemId = id('stock')
     const quantity = item.received - item.used
@@ -339,9 +340,10 @@ export const seedSql = async (today: string) => {
       quantity,
     })
     add('stock_item_categories', { residence_id: R, item_id: itemId, category_id: categories[item.category]!.id })
-    const movement = (kind: string, delta: number, after: number, day: string, comment: string, actor: string) =>
+    const movement = (kind: string, delta: number, after: number, day: string, comment: string, actor: string) => {
+      const movementId = id('movement')
       add('stock_movements', {
-        id: id('movement'),
+        id: movementId,
         residence_id: R,
         item_id: itemId,
         kind,
@@ -352,10 +354,13 @@ export const seedSql = async (today: string) => {
         actor_id: actor,
         created_at: at(day, '11:00'),
       })
+      return movementId
+    }
     movement('in', item.received, item.received, addDays(today, -45), 'Livraison fournisseur', MANAGER)
     const first = Math.ceil(item.used / 2)
     movement('out', -first, item.received - first, addDays(today, -20), 'Ménage', CLEANERS[0])
-    movement('out', first - item.used, quantity, addDays(today, -4), 'Ménage', CLEANERS[1])
+    const lastOut = movement('out', first - item.used, quantity, addDays(today, -4), 'Ménage', CLEANERS[1])
+    stockIds[item.name] = { item: itemId, lastOut }
   }
   add('stock_views', { id: 'seed-view-menage', residence_id: R, name: 'Chariot ménage' })
   for (const category of [0, 1, 2])
@@ -370,6 +375,7 @@ export const seedSql = async (today: string) => {
       id: 'seed-template-standard',
       name: 'Ménage standard',
       is_default: 1,
+      default_type: null,
       items: [
         ['task', 'Aspirer et laver les sols'],
         ['task', 'Nettoyer la salle de bain'],
@@ -382,6 +388,7 @@ export const seedSql = async (today: string) => {
       id: 'seed-template-depart',
       name: 'Remise en état départ',
       is_default: 0,
+      default_type: 'departure',
       items: [
         ['task', 'Dégivrer et nettoyer le réfrigérateur'],
         ['task', 'Nettoyer plaques et hotte'],
@@ -391,6 +398,18 @@ export const seedSql = async (today: string) => {
         ['check', 'Clés et badge récupérés'],
       ],
     },
+    {
+      id: 'seed-template-communs',
+      name: 'Parties communes',
+      is_default: 0,
+      default_type: 'commons',
+      items: [
+        ['task', 'Balayer et laver les sols'],
+        ['task', 'Vider les poubelles'],
+        ['check', 'Filtres des sèche-linge propres'],
+        ['check', 'Éclairage fonctionnel'],
+      ],
+    },
   ] as const
   for (const template of templates) {
     add('cleaning_templates', {
@@ -398,6 +417,7 @@ export const seedSql = async (today: string) => {
       residence_id: R,
       name: template.name,
       is_default: template.is_default,
+      default_type: template.default_type,
     })
     template.items.forEach(([kind, label], position) =>
       add('cleaning_template_items', {
@@ -415,6 +435,8 @@ export const seedSql = async (today: string) => {
 
   const priorities = ['normal', 'normal', 'high', 'normal', 'urgent', 'low'] as const
   const cleaningLots = lots.filter((lot) => !vacant.has(lot.id))
+  const doneTasks: { id: string; day: string }[] = []
+  const issueItems: { id: string; lot: string; day: string }[] = []
   for (let offset = -7; offset <= 7; offset++) {
     const day = addDays(today, offset)
     const weekday = new Date(day).getUTCDay()
@@ -445,8 +467,10 @@ export const seedSql = async (today: string) => {
           : issue && kind === 'check' && position === template.items.length - 1
             ? 'issue'
             : 'done'
+        const itemId = id('cleaning-item')
+        if (state === 'issue') issueItems.push({ id: itemId, lot: lot.id, day })
         add('cleaning_task_items', {
-          id: id('cleaning-item'),
+          id: itemId,
           residence_id: R,
           task_id: taskId,
           kind,
@@ -458,10 +482,12 @@ export const seedSql = async (today: string) => {
           updated_at: done ? at(day, '11:30') : null,
         })
       })
-      if (done)
+      if (done) {
+        doneTasks.push({ id: taskId, day })
         out.push(
           `UPDATE cleaning_tasks SET status='done',report=${literal(issue ? 'Anomalie signalée' : '')},completed_at='${at(day, '12:00')}',completed_by='${agent}' WHERE id='${taskId}';`,
         )
+      }
     })
   }
 
@@ -517,6 +543,111 @@ export const seedSql = async (today: string) => {
     { id: 'seed-place-parking', name: 'Parking', building_id: null, description: 'Niveau -1' },
   ]
   for (const place of places) add('places', { ...place, residence_id: R })
+
+  const cleaningTask = (
+    target: { lot?: string; place?: string },
+    type: string,
+    day: string,
+    agent: string,
+    template: (typeof templates)[number],
+    done: boolean,
+    note = '',
+  ) => {
+    const taskId = id('cleaning')
+    add('cleaning_tasks', {
+      id: taskId,
+      residence_id: R,
+      lot_id: target.lot ?? null,
+      place_id: target.place ?? null,
+      type,
+      agent_id: agent,
+      day,
+      template_name: template.name,
+      note,
+      created_by: MANAGER,
+      created_at: at(addDays(day, -2), '08:00'),
+    })
+    template.items.forEach(([kind, label], position) =>
+      add('cleaning_task_items', {
+        id: id('cleaning-item'),
+        residence_id: R,
+        task_id: taskId,
+        kind,
+        label,
+        position,
+        state: done ? 'done' : 'todo',
+        updated_by: done ? agent : null,
+        updated_at: done ? at(day, '10:30') : null,
+      }),
+    )
+    if (done)
+      out.push(
+        `UPDATE cleaning_tasks SET status='done',completed_at='${at(day, '11:00')}',completed_by='${agent}' WHERE id='${taskId}';`,
+      )
+    return taskId
+  }
+  const [, departure, commons] = templates
+  const lotState = (lot: string, cleanliness: string, since: string) =>
+    out.push(`UPDATE lots SET cleanliness='${cleanliness}',cleanliness_at='${since}' WHERE id='${lot}';`)
+
+  const departed = (lot: string, index: number, end: string) => {
+    const stay = addStay(lot, index, addDays(end, -280), end, true, true)
+    inspection(stay, 'entry', stay.start, 'done')
+    inspection(stay, 'exit', end, 'done', '10:00')
+  }
+  departed('seed-lot-a305', 70, addDays(today, -3))
+  lotState('seed-lot-a305', 'dirty', addDays(today, -3))
+
+  departed('seed-lot-a107', 71, addDays(today, -2))
+  lotState('seed-lot-a107', 'dirty', addDays(today, -2))
+  const arrivalToday = addStay('seed-lot-a107', 72, today, addDays(today, 300), false, false)
+  inspection(arrivalToday, 'entry', today, 'planned', '16:00')
+  cleaningTask(
+    { lot: 'seed-lot-a107' },
+    'departure',
+    today,
+    CLEANERS[0],
+    departure,
+    false,
+    'Arrivée à 16 h : à faire en premier.',
+  )
+
+  departed('seed-lot-b05', 73, addDays(today, -4))
+  const prepared = cleaningTask({ lot: 'seed-lot-b05' }, 'departure', addDays(today, -1), CLEANERS[1], departure, true)
+  out.push(
+    `UPDATE cleaning_tasks SET review='approved',reviewed_at='${at(addDays(today, -1), '15:00')}',reviewed_by='${MANAGER}' WHERE id='${prepared}';`,
+  )
+  lotState('seed-lot-b05', 'inspected', at(addDays(today, -1), '15:00'))
+  const arrivalTomorrow = addStay('seed-lot-b05', 74, addDays(today, 1), addDays(today, 300), false, false)
+  inspection(arrivalTomorrow, 'entry', arrivalTomorrow.start, 'planned', '11:00')
+
+  for (let offset = -7; offset <= 14; offset++) {
+    const day = addDays(today, offset)
+    const weekday = new Date(day).getUTCDay()
+    if (weekday === 1 || weekday === 4)
+      cleaningTask({ place: 'seed-place-laverie' }, 'commons', day, CLEANERS[1], commons, offset < 0)
+    if (weekday === 5) cleaningTask({ place: 'seed-place-hall-a' }, 'commons', day, CLEANERS[0], commons, offset < 0)
+  }
+
+  const leak = issueItems[0]
+  if (leak)
+    add('issues', {
+      id: id('issue'),
+      residence_id: R,
+      title: 'Robinet de la douche qui fuit',
+      description: 'Constaté pendant le ménage.',
+      reported_on: leak.day,
+      lot_id: leak.lot,
+      status: 'open',
+      priority: 'high',
+      created_by: MANAGER,
+      created_at: at(leak.day, '14:00'),
+      cleaning_item_id: leak.id,
+    })
+  const supplied = doneTasks.findLast((task) => task.day <= addDays(today, -4)) ?? doneTasks[0]
+  const paper = stockIds['Papier toilette']
+  if (supplied && paper)
+    out.push(`UPDATE stock_movements SET cleaning_task_id='${supplied.id}' WHERE id='${paper.lastOut}';`)
   const suppliers = [
     {
       id: 'seed-supplier-plomberie',

@@ -46,6 +46,7 @@ import {
 import { Feedback, Loading, roleLabels } from '../features/status.tsx'
 import { call, SESSION_EXPIRED } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
+import { forgetSession, loadSession } from '../lib/session.ts'
 import { CommandBar } from '../command/CommandBar.tsx'
 import { useMobile } from '../lib/useMobile.ts'
 import { useCrumb } from './crumb.ts'
@@ -61,7 +62,7 @@ const snapshot = () => window.location.hash.slice(1) || 'overview'
 
 export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThemeChange: (mode: ThemeMode) => void }) {
   const route = useSyncExternalStore(subscribe, snapshot, () => 'overview'),
-    load = useCallback(() => call((client) => client.auth.status()), []),
+    load = useCallback(() => loadSession(), []),
     auth = useQuery('auth', load),
     mutation = useMutation(),
     [isNavCollapsed, setIsNavCollapsed] = useState(false),
@@ -329,7 +330,10 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
                             onClick: () =>
                               void mutation.run(
                                 () => call((client) => client.auth.logout()),
-                                () => void auth.refresh(),
+                                () => {
+                                  forgetSession()
+                                  void auth.refresh()
+                                },
                               ),
                           },
                         ],

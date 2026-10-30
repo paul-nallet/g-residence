@@ -59,6 +59,7 @@ export const MovementInput = Schema.Struct({
   quantity,
   occurred_on: CivilDate,
   comment: OptionalText(500),
+  cleaning_task_id: Schema.optionalKey(Schema.String),
 })
 export const Movement = Schema.Struct({
   id: Schema.String,
@@ -69,6 +70,7 @@ export const Movement = Schema.Struct({
   comment: Schema.String,
   actor: Schema.String,
   created_at: Schema.String,
+  cleaning_task_id: Schema.NullOr(Schema.String),
 })
 export type Movement = typeof Movement.Type
 export const MovementPage = Schema.Struct({ items: Schema.Array(Movement), total: Schema.Number })

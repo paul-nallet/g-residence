@@ -170,7 +170,7 @@ const make = Effect.gen(function* () {
             kind: 'cleaning_status',
             taskId,
             status,
-            summary: `${label} · ménage lot ${task.lot_number} du ${task.day}`,
+            summary: `${label} · ménage ${task.lot_id ? 'lot ' + task.lot_number : task.place_name} du ${task.day}`,
           })
           return awaiting
         }),

@@ -17,6 +17,20 @@ export const OptionalText = (max = 2000) =>
   )
 export const CivilDate = Schema.String.check(Schema.makeFilter(isCivilDate, { message: 'Date invalide.' }))
 export const LocalDateTime = Schema.String.check(Schema.makeFilter(isLocalDateTime, { message: 'Horaire invalide.' }))
+export const Instant = Schema.String.check(
+  Schema.makeFilter(
+    (value: string) =>
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value) && !Number.isNaN(Date.parse(value)),
+    {
+      message: 'Horodatage invalide.',
+    },
+  ),
+)
+export const ClientId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, {
+    message: 'Identifiant invalide.',
+  }),
+)
 export const CivilMonth = Schema.String.check(
   Schema.makeFilter((value: string) => /^\d{4}-\d{2}$/.test(value) && isCivilDate(value + '-01'), {
     message: 'Date invalide.',

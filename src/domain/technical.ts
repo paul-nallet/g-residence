@@ -92,6 +92,7 @@ export const Issue = Schema.Struct({
   work_id: Schema.NullOr(Schema.String),
   work_title: Schema.NullOr(Schema.String),
   actor: Schema.String,
+  cleaning_task_id: Schema.NullOr(Schema.String),
 })
 export type Issue = typeof Issue.Type
 export const IssueQuery = {

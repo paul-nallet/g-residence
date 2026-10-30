@@ -13,6 +13,12 @@ export const LotInput = Schema.Struct({
   building_id: RequiredText('Bâtiment', 200),
 })
 export const Occupancy = Schema.Literals(['vacant', 'planned', 'occupied'])
+export const Cleanliness = Schema.Literals(['dirty', 'clean', 'inspected', 'out_of_service'])
+export type Cleanliness = typeof Cleanliness.Type
+export const CleanlinessFilter = Schema.Literals(['all', ...Cleanliness.literals]).annotate({
+  message: 'Filtre invalide.',
+})
+export type CleanlinessFilter = typeof CleanlinessFilter.Type
 export const LotStateFilter = Schema.Literals(['all', ...Occupancy.literals]).annotate({ message: 'Filtre invalide.' })
 export type LotStateFilter = typeof LotStateFilter.Type
 export const LotArchiveFilter = Schema.Literals(['no', 'yes']).annotate({ message: 'Filtre invalide.' })
@@ -23,6 +29,7 @@ export const LotQuery = {
   q: Schema.optionalKey(Schema.String),
   building: Schema.optionalKey(Schema.String),
   state: Schema.optionalKey(LotStateFilter),
+  cleanliness: Schema.optionalKey(CleanlinessFilter),
   archived: Schema.optionalKey(LotArchiveFilter),
   page: Schema.optionalKey(PageNumber(100000)),
   sort: Schema.optionalKey(LotSort),
@@ -36,6 +43,8 @@ export const Lot = Schema.Struct({
   type: Schema.String,
   archived: Schema.Number,
   occupancy: Occupancy,
+  cleanliness: Cleanliness,
+  cleanliness_at: Schema.NullOr(Schema.String),
 })
 export type Lot = typeof Lot.Type
 export const LotRow = Schema.Struct({

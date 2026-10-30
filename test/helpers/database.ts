@@ -20,8 +20,11 @@ export const database = (through = '9999') => {
   const directory = new URL('../../migrations/', import.meta.url)
   for (const file of readdirSync(directory)
     .filter((entry) => entry.endsWith('.sql') && entry <= through)
-    .sort())
+    .sort()) {
+    sqlite.exec('BEGIN')
     sqlite.exec(readFileSync(new URL(file, directory), 'utf8'))
+    sqlite.exec('COMMIT')
+  }
   const prepare = (query: string) => {
     if (expressionDepth(query) > d1MaxExpressionDepth)
       throw new Error(`Expression tree is too large (maximum depth ${d1MaxExpressionDepth})`)
