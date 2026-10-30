@@ -2,9 +2,12 @@ import type { Priority } from '../domain/priority.ts'
 import { Context, Effect, Layer } from 'effect'
 import {
   CleaningAgentInvalid,
+  CleaningAlreadyApproved,
   CleaningAlreadyPlanned,
   type CleaningBulk,
+  CleaningCancelled,
   type CleaningChecklist,
+  type CleaningComment,
   CleaningDayTaken,
   CleaningIncomplete,
   type CleaningItem,
@@ -12,7 +15,10 @@ import {
   CleaningItemNotFound,
   type CleaningItemState,
   CleaningLocked,
+  CleaningNotDone,
   type CleaningPoint,
+  type CleaningReviewFilter,
+  type CleaningReviewInput,
   type CleaningStatus,
   type CleaningTask,
   CleaningTaskNotFound,
@@ -22,6 +28,7 @@ import {
   CleaningTemplateNotFound,
   MAX_PERIOD_DAYS,
   PAGE_SIZE,
+  REVIEW_LIMIT,
 } from '../domain/cleaning.ts'
 import { now } from '../domain/clock.ts'
 import { CurrentUser, manager } from '../domain/CurrentUser.ts'
@@ -31,17 +38,26 @@ import { onViolation, sql, Sql, type SqlError, type Statement } from './Database
 
 const taskColumns = `t.id,t.lot_id,l.number AS lot_number,COALESCE(b.name,'') AS building_name,t.agent_id,a.name AS agent_name,
   t.day,t.status,t.priority,t.template_name,t.note,t.report,t.completed_at,c.name AS completed_by,t.position,
+  t.review,t.reviewed_at,r.name AS reviewed_by,
+  (SELECT COUNT(*) FROM cleaning_task_comments m WHERE m.task_id=t.id) AS comments,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id) AS total,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state<>'todo') AS handled,
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state='issue') AS issues,
   (SELECT json_group_array(label || ' : ' || note) FROM (SELECT i.label,i.note FROM cleaning_task_items i
     WHERE i.task_id=t.id AND i.state='issue' AND i.note<>'' ORDER BY i.position,i.rowid)) AS remarks
   FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id JOIN users a ON a.id=t.agent_id
-  LEFT JOIN buildings b ON b.id=l.building_id AND b.residence_id=l.residence_id LEFT JOIN users c ON c.id=t.completed_by`
+  LEFT JOIN buildings b ON b.id=l.building_id AND b.residence_id=l.residence_id LEFT JOIN users c ON c.id=t.completed_by
+  LEFT JOIN users r ON r.id=t.reviewed_by`
 type TaskRow = Omit<CleaningTask, 'remarks'> & { remarks: string }
 const taskOf = (row: TaskRow): CleaningTask => ({ ...row, remarks: JSON.parse(row.remarks) as string[] })
 const visible = (me: Me) =>
   me.role === 'cleaner' ? { clause: ' AND t.agent_id=?', values: [me.id] } : { clause: '', values: [] }
+
+const reviewClauses: Record<CleaningReviewFilter, string> = {
+  pending: " AND t.status='done' AND t.review IS NULL",
+  approved: " AND t.review='approved'",
+  revision: " AND t.status='planned' AND t.review='revision'",
+}
 
 const placeholders = (values: readonly unknown[]) => values.map(() => '?').join(',')
 const insertItems = (me: Me, taskId: string, items: readonly CleaningPoint[], start = 0) =>
@@ -57,6 +73,18 @@ const insertItems = (me: Me, taskId: string, items: readonly CleaningPoint[], st
     ),
   )
 
+const insertComment = (me: Me, taskId: string, kind: CleaningComment['kind'], body: string, at: string) =>
+  sql(
+    'INSERT INTO cleaning_task_comments(id,residence_id,task_id,kind,body,author_id,created_at) VALUES(?,?,?,?,?,?,?)',
+    crypto.randomUUID(),
+    me.residenceId,
+    taskId,
+    kind,
+    body,
+    me.id,
+    at,
+  )
+
 const planned = (task: CleaningTask) => (task.status === 'planned' ? Effect.void : Effect.fail(new CleaningLocked()))
 
 const violations = <A, E, R>(self: Effect.Effect<A, E | SqlError, R>) =>
@@ -66,6 +94,8 @@ const violations = <A, E, R>(self: Effect.Effect<A, E | SqlError, R>) =>
     onViolation('cleaning_agent', () => new CleaningAgentInvalid()),
     onViolation('cleaning_incomplete', () => new CleaningIncomplete()),
     onViolation('cleaning_locked', () => new CleaningLocked()),
+    onViolation('cleaning_cancelled', () => new CleaningCancelled()),
+    onViolation('cleaning_not_done', () => new CleaningNotDone()),
     onViolation(
       'lot_unavailable',
       () => new InvalidInput({ message: 'Un des lots choisis est archivé ou introuvable. Rechargez la page.' }),
@@ -225,6 +255,7 @@ const make = Effect.gen(function* () {
     to: string
     agent?: string
     priority?: Priority
+    review?: CleaningReviewFilter
   }) {
     const me = yield* CurrentUser
     if (input.to < input.from || Date.parse(input.to) - Date.parse(input.from) > MAX_PERIOD_DAYS * 86400000)
@@ -233,8 +264,8 @@ const make = Effect.gen(function* () {
     const agent = me.role === 'cleaner' ? '' : (input.agent ?? '')
     const rows = yield* db.all<TaskRow>(
       sql(
-        `SELECT ${taskColumns} WHERE t.residence_id=? AND t.day BETWEEN ? AND ? AND (?='' OR t.agent_id=?) AND (?='' OR t.priority=?)${scope.clause}
-        ORDER BY t.day,CASE t.status WHEN 'planned' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,t.position IS NULL,t.position,
+        `SELECT ${taskColumns} WHERE t.residence_id=? AND t.day BETWEEN ? AND ? AND (?='' OR t.agent_id=?) AND (?='' OR t.priority=?)${scope.clause}${input.review ? reviewClauses[input.review] : ''}
+        ORDER BY t.day DESC,CASE t.status WHEN 'planned' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,t.position IS NULL,t.position,
           CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,l.number COLLATE NOCASE,t.id`,
         me.residenceId,
         input.from,
@@ -244,6 +275,19 @@ const make = Effect.gen(function* () {
         input.priority ?? '',
         input.priority ?? '',
         ...scope.values,
+      ),
+    )
+    return rows.map(taskOf)
+  })
+
+  const reviews = Effect.fn('Cleaning.reviews')(function* () {
+    const me = yield* manager
+    const rows = yield* db.all<TaskRow>(
+      sql(
+        `SELECT ${taskColumns} WHERE t.residence_id=?${reviewClauses.pending}
+        ORDER BY t.completed_at DESC,t.id LIMIT ?`,
+        me.residenceId,
+        REVIEW_LIMIT,
       ),
     )
     return rows.map(taskOf)
@@ -279,15 +323,25 @@ const make = Effect.gen(function* () {
   const task = Effect.fn('Cleaning.task')(function* (id: string) {
     const me = yield* CurrentUser
     const found = yield* findTask(id)
-    const items = yield* db.all<CleaningItem>(
-      sql(
-        `SELECT i.id,i.kind,i.label,i.state,i.note,u.name AS updated_by,i.updated_at FROM cleaning_task_items i
-        LEFT JOIN users u ON u.id=i.updated_by WHERE i.task_id=? AND i.residence_id=? ORDER BY i.position,i.rowid`,
-        id,
-        me.residenceId,
+    const [items, comments] = yield* Effect.all([
+      db.all<CleaningItem>(
+        sql(
+          `SELECT i.id,i.kind,i.label,i.state,i.note,u.name AS updated_by,i.updated_at FROM cleaning_task_items i
+          LEFT JOIN users u ON u.id=i.updated_by WHERE i.task_id=? AND i.residence_id=? ORDER BY i.position,i.rowid`,
+          id,
+          me.residenceId,
+        ),
       ),
-    )
-    return { task: found, items }
+      db.all<CleaningComment>(
+        sql(
+          `SELECT m.id,m.kind,m.body,u.name AS author,m.created_at FROM cleaning_task_comments m
+          JOIN users u ON u.id=m.author_id WHERE m.task_id=? AND m.residence_id=? ORDER BY m.created_at,m.rowid`,
+          id,
+          me.residenceId,
+        ),
+      ),
+    ])
+    return { task: found, items, comments }
   })
 
   const create = Effect.fn('Cleaning.create')(function* (input: {
@@ -477,7 +531,8 @@ const make = Effect.gen(function* () {
       yield* planned(found)
       yield* write([
         sql(
-          `UPDATE cleaning_tasks SET status='done',report=?,completed_at=?,completed_by=? WHERE id=? AND residence_id=? AND status='planned'`,
+          `UPDATE cleaning_tasks SET status='done',report=?,completed_at=?,completed_by=?,review=NULL,reviewed_at=NULL,reviewed_by=NULL
+          WHERE id=? AND residence_id=? AND status='planned'`,
           input.report,
           yield* now,
           me.id,
@@ -492,11 +547,88 @@ const make = Effect.gen(function* () {
     else if (found.status === 'planned') return yield* new CleaningAlreadyPlanned()
     yield* write([
       sql(
-        'UPDATE cleaning_tasks SET status=?,completed_at=NULL,completed_by=NULL WHERE id=? AND residence_id=?',
+        `UPDATE cleaning_tasks SET status=?,completed_at=NULL,completed_by=NULL,review=NULL,reviewed_at=NULL,reviewed_by=NULL
+        WHERE id=? AND residence_id=?`,
         input.status,
         id,
         me.residenceId,
       ),
+    ])
+    return { ok: true }
+  })
+
+  const comment = Effect.fn('Cleaning.comment')(function* (taskId: string, body: string) {
+    const me = yield* CurrentUser
+    const found = yield* findTask(taskId)
+    if (found.status === 'cancelled') return yield* new CleaningCancelled()
+    yield* write([insertComment(me, taskId, 'note', body, yield* now)])
+    return { ok: true }
+  })
+
+  const review = Effect.fn('Cleaning.review')(function* (taskId: string, input: typeof CleaningReviewInput.Type) {
+    const me = yield* manager
+    const found = yield* findTask(taskId)
+    if (found.status !== 'done') return yield* new CleaningNotDone()
+    if (found.review === 'approved') return yield* new CleaningAlreadyApproved()
+    const at = yield* now
+    if (input.decision === 'approved') {
+      yield* write([
+        sql(
+          `UPDATE cleaning_tasks SET review='approved',reviewed_at=?,reviewed_by=? WHERE id=? AND residence_id=? AND status='done'`,
+          at,
+          me.id,
+          taskId,
+          me.residenceId,
+        ),
+        insertComment(me, taskId, 'approved', input.comment, at),
+      ])
+      return { ok: true }
+    }
+    if (!input.comment) return yield* new InvalidInput({ message: 'Précisez ce qu’il faut reprendre.' })
+    const redo = [...new Set(input.item_ids ?? [])]
+    if (redo.length) {
+      const known = yield* db.all<{ id: string }>(
+        sql(
+          `SELECT id FROM cleaning_task_items WHERE task_id=? AND residence_id=? AND id IN (${placeholders(redo)})`,
+          taskId,
+          me.residenceId,
+          ...redo,
+        ),
+      )
+      if (known.length !== redo.length) return yield* new CleaningItemNotFound()
+    }
+    const day = input.day && input.day !== found.day ? input.day : null
+    yield* write([
+      sql(
+        `UPDATE cleaning_tasks SET status='planned',completed_at=NULL,completed_by=NULL,review='revision',reviewed_at=?,reviewed_by=?
+        WHERE id=? AND residence_id=? AND status='done'`,
+        at,
+        me.id,
+        taskId,
+        me.residenceId,
+      ),
+      ...(day
+        ? [
+            sql(
+              'UPDATE cleaning_tasks SET day=?,position=NULL WHERE id=? AND residence_id=?',
+              day,
+              taskId,
+              me.residenceId,
+            ),
+          ]
+        : []),
+      ...(redo.length
+        ? [
+            sql(
+              `UPDATE cleaning_task_items SET state='todo',note='',updated_by=NULL,updated_at=NULL
+              WHERE task_id=? AND residence_id=? AND id IN (${placeholders(redo)})`,
+              taskId,
+              me.residenceId,
+              ...redo,
+            ),
+          ]
+        : []),
+      insertComment(me, taskId, 'revision', input.comment, at),
     ])
     return { ok: true }
   })
@@ -583,6 +715,7 @@ const make = Effect.gen(function* () {
     updateTemplate,
     removeTemplate,
     tasks,
+    reviews,
     lotTasks,
     create,
     movements,
@@ -594,6 +727,8 @@ const make = Effect.gen(function* () {
     updateItem,
     checkAll,
     checklist,
+    comment,
+    review,
   }
 })
 

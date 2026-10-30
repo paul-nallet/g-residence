@@ -1,4 +1,4 @@
-import type { Priority } from '../../src/domain/priority.ts'
+import { type Priority, priorityLabels } from '../../src/domain/priority.ts'
 import { PriorityField, PriorityFilter, PriorityToken, type PriorityFilterValue } from './priority.tsx'
 import { type ClipboardEvent, useCallback, useRef, useState } from 'react'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
@@ -19,26 +19,32 @@ import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector } from '@astryxdesign/core/Selector'
 import { HStack, StackItem, VStack } from '@astryxdesign/core/Stack'
-import { Tab, TabList } from '@astryxdesign/core/TabList'
 import {
   Table,
+  type TablePlugin,
   TableSelectionToolbar,
+  pixel,
   proportional,
   useTablePagination,
   useTableSelection,
 } from '@astryxdesign/core/Table'
+import { Popover } from '@astryxdesign/core/Popover'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 import { Token } from '@astryxdesign/core/Token'
+import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
-import { Check, MessageSquareText, Plus, Trash2, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, MessageSquareText, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import type {
+  CleaningComment,
+  CleaningCommentKind,
   CleaningItem,
   CleaningItemKind,
   CleaningItemState,
   CleaningOptions,
+  CleaningReviewFilter,
   CleaningTask,
   CleaningTemplate,
 } from '../../src/domain/cleaning.ts'
@@ -101,15 +107,6 @@ const rememberAgent = (id: string) => {
 const defaultAgent = (agents: CleaningOptions['agents'], ...preferred: string[]) => {
   const cleaners = agents.filter((agent) => agent.role === 'cleaner')
   return preferred.find((id) => cleaners.some((agent) => agent.id === id)) ?? cleaners[0]?.id ?? ''
-}
-
-function CleaningTabs({ current }: { current: 'planning' | 'templates' }) {
-  return (
-    <TabList value={current} onChange={() => undefined}>
-      <Tab value="planning" label="Planning" href="#cleaning" />
-      <Tab value="templates" label="Fiches" href="#cleaning/fiches" />
-    </TabList>
-  )
 }
 
 const agentOption = (agent: CleaningOptions['agents'][number]) => ({
@@ -502,12 +499,33 @@ function PlanEditor({
   )
 }
 
-export const taskComments = (task: Pick<CleaningTask, 'note' | 'report' | 'remarks'>) =>
+export const taskComments = (task: Pick<CleaningTask, 'note' | 'report' | 'remarks' | 'comments'>) =>
   [
     task.note && 'Consigne : ' + task.note,
     task.report && 'Commentaire : ' + task.report,
     ...task.remarks.map((remark) => 'Constat · ' + remark),
+    task.comments > 0 && plural(task.comments, 'commentaire', 'commentaires'),
   ].filter((comment): comment is string => Boolean(comment))
+export function ReviewToken({ task }: { task: Pick<CleaningTask, 'status' | 'review'> }) {
+  if (task.status === 'done' && !task.review) return <Token label="À vérifier" color="orange" size="sm" />
+  if (task.status === 'done' && task.review === 'approved') return <Token label="Validé" color="green" size="sm" />
+  if (task.status === 'planned' && task.review === 'revision')
+    return <Token label="À reprendre" color="red" size="sm" />
+  return null
+}
+const reviewFilters: Record<CleaningReviewFilter, string> = {
+  pending: 'À vérifier',
+  approved: 'Validés',
+  revision: 'À reprendre',
+}
+function TaskState({ task }: { task: CleaningTask }) {
+  return (
+    <HStack gap={1} vAlign="center" wrap="wrap">
+      <StateToken state={task.status} />
+      <ReviewToken task={task} />
+    </HStack>
+  )
+}
 export function CommentIcon({ comments }: { comments: readonly string[] }) {
   return comments.length ? (
     <Tooltip
@@ -682,6 +700,13 @@ function Progress({ task }: { task: CleaningTask }) {
   )
 }
 
+const selectionSpacer: TablePlugin<CleaningTask> = {
+  transformColumns: (columns) => [
+    { key: 'selection-spacer', header: '', width: pixel(36), resizable: false, renderCell: () => null },
+    ...columns,
+  ],
+}
+
 function DayTable({
   date,
   tasks,
@@ -756,6 +781,7 @@ function DayTable({
               endContent={
                 <VStack gap={1} hAlign="end">
                   <StateToken state={task.status} />
+                  <ReviewToken task={task} />
                   {task.priority !== 'normal' && <PriorityToken priority={task.priority} />}
                 </VStack>
               }
@@ -767,7 +793,7 @@ function DayTable({
           data={[...tasks]}
           idKey="id"
           dividers="rows"
-          plugins={{ selection }}
+          plugins={movable.length ? { selection } : { selectionSpacer }}
           columns={[
             {
               key: 'lot_number',
@@ -801,8 +827,8 @@ function DayTable({
             {
               key: 'status',
               header: 'Statut',
-              width: proportional(1, { minWidth: 90 }),
-              renderCell: (task) => <StateToken state={task.status} />,
+              width: proportional(1, { minWidth: 120 }),
+              renderCell: (task) => <TaskState task={task} />,
             },
           ]}
         />
@@ -891,7 +917,7 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
               key: 'status',
               header: 'Statut',
               width: proportional(1),
-              renderCell: (task) => <StateToken state={task.status} />,
+              renderCell: (task) => <TaskState task={task} />,
             },
           ]}
         />
@@ -983,6 +1009,7 @@ function MyDay({ me }: { me: Me }) {
                     <HStack gap={2} vAlign="center" wrap="wrap">
                       <Heading level={2}>{index + 1 + '. ' + taskLot(task)}</Heading>
                       {index === 0 && <Token label="Prochain lot" color="blue" size="sm" />}
+                      <ReviewToken task={task} />
                       {task.priority !== 'normal' && <PriorityToken priority={task.priority} />}
                     </HStack>
                     {task.total > 0 && (
@@ -1011,9 +1038,12 @@ function MyDay({ me }: { me: Me }) {
                   href={'#cleaning/' + task.id}
                   description={task.completed_at ? 'Terminé ' + timeLabel(task.completed_at) : undefined}
                   endContent={
-                    task.issues > 0 ? (
-                      <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
-                    ) : undefined
+                    <HStack gap={1} vAlign="center">
+                      {task.issues > 0 && (
+                        <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
+                      )}
+                      <ReviewToken task={task} />
+                    </HStack>
                   }
                 />
               ))}
@@ -1034,6 +1064,7 @@ function Planning() {
   const [date, setDate] = useHashParam('date', today()),
     [agent, setAgent] = useHashParam('agent', ''),
     [priority, setPriority] = useState<PriorityFilterValue>('all'),
+    [review, setReview] = useHashParam<CleaningReviewFilter | 'all'>('verification', 'all'),
     [view, setView] = useHashParam('vue', mobile ? 'day' : 'week'),
     [planning, setPlanning] = useState(false),
     [selected, setSelected] = useState<ReadonlySet<string>>(new Set()),
@@ -1049,18 +1080,47 @@ function Planning() {
     () =>
       call((client) =>
         client.cleaning.tasks({
-          query: { from, to, ...(agent ? { agent } : {}), ...(priority !== 'all' ? { priority } : {}) },
+          query: {
+            from,
+            to,
+            ...(agent ? { agent } : {}),
+            ...(priority !== 'all' ? { priority } : {}),
+            ...(review !== 'all' ? { review } : {}),
+          },
         }),
       ),
-    [from, to, agent, priority],
+    [from, to, agent, priority, review],
   )
-  const result = useQuery(`cleaning:${from}:${to}:${agent}:${priority}`, load)
+  const result = useQuery(`cleaning:${from}:${to}:${agent}:${priority}:${review}`, load)
   const options = useQuery<CleaningOptions | null>('cleaning-options', loadOptions)
   const mutation = useMutation()
   const tasks = result.data ?? []
   const active = tasks.filter((task) => task.status !== 'cancelled')
   const done = active.filter((task) => task.status === 'done').length
   const issues = active.reduce((sum, task) => sum + task.issues, 0)
+  const toReview = active.filter((task) => task.status === 'done' && !task.review).length
+  const filtered = [agent, priority !== 'all', review !== 'all'].filter(Boolean).length
+  const agentName = options.data?.agents.find((item) => item.id === agent)?.name
+  const filterTags = filtered > 0 && (
+    <>
+      {agent && <Token label={'Agent : ' + (agentName ?? '…')} size="sm" onRemove={() => setAgent('')} />}
+      {priority !== 'all' && (
+        <Token label={'Priorité : ' + priorityLabels[priority]} size="sm" onRemove={() => setPriority('all')} />
+      )}
+      {review !== 'all' && (
+        <Token label={'Vérification : ' + reviewFilters[review]} size="sm" onRemove={() => setReview('all')} />
+      )}
+      <Button
+        label="Effacer les filtres"
+        variant="ghost"
+        onClick={() => {
+          setAgent('')
+          setPriority('all')
+          setReview('all')
+        }}
+      />
+    </>
+  )
   const movable = tasks.filter((task) => task.status === 'planned')
   const chosen = movable.filter((task) => selected.has(task.id))
   const select = (ids: readonly string[], isSelected: boolean) =>
@@ -1084,13 +1144,8 @@ function Planning() {
   return (
     <PageLayout
       header={
-        <HStack gap={3} wrap="wrap" hAlign="between">
-          <VStack gap={1}>
-            <Heading level={1}>Ménage</Heading>
-            <Text color="secondary">
-              Cochez des tâches pour les modifier ensemble ; ouvrez une tâche pour sa checklist.
-            </Text>
-          </VStack>
+        <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center">
+          <Heading level={1}>Planning du ménage</Heading>
           <Button
             label="Planifier un ménage"
             variant="primary"
@@ -1099,7 +1154,6 @@ function Planning() {
           />
         </HStack>
       }
-      navigation={<CleaningTabs current="planning" />}
       footer={
         chosen.length > 0 && options.data && mobile ? (
           <HStack gap={2} vAlign="center" hAlign="between">
@@ -1147,78 +1201,127 @@ function Planning() {
         ) : undefined
       }
     >
-      <HStack gap={3} wrap="wrap" vAlign="center" hAlign="between">
-        <HStack gap={3} wrap="wrap" vAlign="center">
-          <PeriodNav
-            label={week ? 'Navigation par semaine' : 'Navigation par jour'}
-            previous={week ? 'Précédente' : 'Précédent'}
-            current={week ? 'Cette semaine' : 'Aujourd’hui'}
-            next={week ? 'Suivante' : 'Suivant'}
-            onPrevious={() => setDate(addDays(from, -step))}
-            onCurrent={() => setDate(today())}
-            onNext={() => setDate(addDays(from, step))}
-          />
-          <VStack gap={0}>
-            <Text weight="semibold">{week ? 'Du ' + dateLabel(from) + ' au ' + dateLabel(to) : dayLabel(date)}</Text>
-            {result.data && (
-              <Text type="supporting">
-                {plural(active.length, 'tâche', 'tâches') +
-                  ', ' +
-                  plural(done, 'terminée', 'terminées') +
-                  (issues ? ', ' + plural(issues, 'anomalie signalée', 'anomalies signalées') : '')}
-              </Text>
+      <Toolbar
+        label="Période et filtres du planning"
+        size="sm"
+        gap={2}
+        startContent={
+          <>
+            <IconButton
+              label={week ? 'Semaine précédente' : 'Jour précédent'}
+              icon={<Icon icon={ChevronLeft} />}
+              variant="ghost"
+              onClick={() => setDate(addDays(from, -step))}
+            />
+            <Button label={week ? 'Cette semaine' : 'Aujourd’hui'} onClick={() => setDate(today())} />
+            <IconButton
+              label={week ? 'Semaine suivante' : 'Jour suivant'}
+              icon={<Icon icon={ChevronRight} />}
+              variant="ghost"
+              onClick={() => setDate(addDays(from, step))}
+            />
+            <VStack gap={0}>
+              <Text weight="semibold">{week ? dateLabel(from) + ' – ' + dateLabel(to) : dayLabel(date)}</Text>
+              {result.data && !mobile && (
+                <Text type="supporting">
+                  {[
+                    plural(active.length, 'tâche', 'tâches'),
+                    plural(done, 'terminée', 'terminées'),
+                    issues ? plural(issues, 'anomalie', 'anomalies') : '',
+                    toReview ? toReview + ' à vérifier' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              )}
+            </VStack>
+          </>
+        }
+        endContent={
+          <>
+            {!mobile && filterTags}
+            <Popover
+              label="Filtres du planning"
+              width={320}
+              content={
+                <VStack gap={3}>
+                  {mobile && (
+                    <SegmentedControl label="Vue" value={view} onChange={setView}>
+                      <SegmentedControlItem value="day" label="Jour" />
+                      <SegmentedControlItem value="week" label="Semaine" />
+                    </SegmentedControl>
+                  )}
+                  <DateField
+                    label="Aller à la date"
+                    value={date}
+                    onChange={(value) => {
+                      if (value) setDate(value)
+                    }}
+                  />
+                  {options.data && (
+                    <Selector
+                      label="Agent"
+                      value={agent || 'all'}
+                      onChange={(value) => setAgent(value === 'all' ? '' : value)}
+                      options={[
+                        { value: 'all', label: 'Tous les agents' },
+                        ...options.data.agents.map((item) => ({ value: item.id, label: item.name })),
+                      ]}
+                    />
+                  )}
+                  <PriorityFilter value={priority} onChange={setPriority} />
+                  <Selector
+                    label="Vérification"
+                    value={review}
+                    onChange={(value) =>
+                      setReview(Object.hasOwn(reviewFilters, value) ? (value as CleaningReviewFilter) : 'all')
+                    }
+                    options={[
+                      { value: 'all', label: 'Toutes' },
+                      ...Object.entries(reviewFilters).map(([value, label]) => ({ value, label })),
+                    ]}
+                  />
+                </VStack>
+              }
+            >
+              <Button
+                label="Filtres"
+                icon={<Icon icon={SlidersHorizontal} />}
+                variant={filtered ? 'secondary' : 'ghost'}
+              />
+            </Popover>
+            {!mobile && (
+              <SegmentedControl label="Vue" value={view} onChange={setView}>
+                <SegmentedControlItem value="day" label="Jour" />
+                <SegmentedControlItem value="week" label="Semaine" />
+              </SegmentedControl>
             )}
-          </VStack>
+          </>
+        }
+      />
+      {mobile && filtered > 0 && (
+        <HStack gap={2} wrap="wrap" vAlign="center">
+          {filterTags}
         </HStack>
-        <HStack gap={2} wrap="wrap" vAlign="end">
-          {!mobile && (
-            <DateField
-              label="Aller à la date"
-              labelHidden
-              value={date}
-              onChange={(value) => {
-                if (value) setDate(value)
-              }}
-            />
-          )}
-          {options.data && (
-            <Selector
-              label="Agent"
-              isLabelHidden
-              value={agent || 'all'}
-              onChange={(value) => setAgent(value === 'all' ? '' : value)}
-              options={[
-                { value: 'all', label: 'Tous les agents' },
-                ...options.data.agents.map((item) => ({ value: item.id, label: item.name })),
-              ]}
-            />
-          )}
-          <PriorityFilter value={priority} onChange={setPriority} isLabelHidden />
-          <SegmentedControl label="Vue" value={view} onChange={setView}>
-            <SegmentedControlItem value="day" label="Jour" />
-            <SegmentedControlItem value="week" label="Semaine" />
-          </SegmentedControl>
-        </HStack>
-      </HStack>
-      {movable.length > 1 && (
-        <HStack gap={2} wrap="wrap">
-          <Button
-            size="sm"
-            label={
-              chosen.length === movable.length
-                ? 'Tout désélectionner'
-                : 'Sélectionner les ' + movable.length + ' tâches prévues'
-            }
-            onClick={() =>
-              chosen.length === movable.length
-                ? clear()
-                : select(
-                    movable.map((task) => task.id),
-                    true,
-                  )
-            }
-          />
-        </HStack>
+      )}
+      {mobile && movable.length > 1 && (
+        <Button
+          size="sm"
+          variant="ghost"
+          label={
+            chosen.length === movable.length
+              ? 'Tout désélectionner'
+              : 'Sélectionner les ' + movable.length + ' tâches prévues'
+          }
+          onClick={() =>
+            chosen.length === movable.length
+              ? clear()
+              : select(
+                  movable.map((task) => task.id),
+                  true,
+                )
+          }
+        />
       )}
       <Feedback success={success} error={options.error} />
       {!result.data ? (
@@ -1235,7 +1338,13 @@ function Planning() {
           />
         ))
       ) : (
-        <Text>{week ? 'Aucun ménage prévu cette semaine.' : 'Aucun ménage prévu ce jour.'}</Text>
+        <Text>
+          {review !== 'all'
+            ? 'Aucun ménage « ' + reviewFilters[review] + ' » sur cette période.'
+            : week
+              ? 'Aucun ménage prévu cette semaine.'
+              : 'Aucun ménage prévu ce jour.'}
+        </Text>
       )}
       {ordering && (
         <OrderEditor
@@ -1498,6 +1607,148 @@ function FinishEditor({
   )
 }
 
+function CommentEditor({ task, close, saved }: { task: CleaningTask; close: () => void; saved: () => void }) {
+  const [body, setBody] = useState('')
+  const mutation = useMutation()
+  return (
+    <Editor
+      title={'Commenter le ménage du lot ' + task.lot_number}
+      label="Ajouter"
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error}
+      disabled={!body.trim()}
+      submit={() =>
+        void mutation.run(
+          () => call((client) => client.cleaning.comment({ params: { id: task.id }, payload: { body } })),
+          saved,
+        )
+      }
+    >
+      <Text color="secondary">Visible par l’équipe. La checklist et le statut ne changent pas.</Text>
+      <TextArea
+        label="Commentaire"
+        value={body}
+        onChange={setBody}
+        isRequired
+        hasAutoFocus
+        placeholder="Chambre faite, cuisine demain matin…"
+      />
+    </Editor>
+  )
+}
+
+function ReviewEditor({
+  task,
+  items,
+  decision,
+  close,
+  saved,
+}: {
+  task: CleaningTask
+  items: readonly CleaningItem[]
+  decision: 'approved' | 'revision'
+  close: () => void
+  saved: () => void
+}) {
+  const revision = decision === 'revision'
+  const [comment, setComment] = useState(''),
+    [day, setDay] = useState(task.day > today() ? task.day : today()),
+    [redo, setRedo] = useState<string[]>([])
+  const mutation = useMutation()
+  return (
+    <Editor
+      title={(revision ? 'Faire reprendre le ménage du lot ' : 'Valider le ménage du lot ') + task.lot_number}
+      label={revision ? 'Demander la reprise' : 'Valider'}
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error}
+      disabled={revision && (!comment.trim() || !day)}
+      submit={() =>
+        void mutation.run(
+          () =>
+            call((client) =>
+              client.cleaning.review({
+                params: { id: task.id },
+                payload: revision ? { decision, comment, day, item_ids: redo } : { decision, comment },
+              }),
+            ),
+          saved,
+        )
+      }
+    >
+      <Text color="secondary">
+        {revision
+          ? task.agent_name + ' retrouvera ce ménage dans sa journée, avec votre commentaire.'
+          : 'Le ménage sera marqué comme validé. Rouvrez-le si vous devez revenir dessus.'}
+      </Text>
+      <TextArea
+        label={revision ? 'Ce qu’il faut reprendre' : 'Commentaire'}
+        value={comment}
+        onChange={setComment}
+        isRequired={revision}
+        isOptional={!revision}
+        hasAutoFocus
+        placeholder={revision ? 'Traces sur le miroir, poussière sous le lit…' : undefined}
+      />
+      {revision && <DateField label="Jour de la reprise" value={day} onChange={setDay} />}
+      {revision && items.length > 0 && (
+        <MultiSelector
+          label="Points à refaire"
+          description="Ces points repassent à faire. Les autres restent cochés."
+          isOptional
+          options={items.map((item) => ({ value: item.id, label: kindTitles[item.kind] + ' · ' + item.label }))}
+          value={redo}
+          onChange={setRedo}
+          placeholder="Aucun"
+        />
+      )}
+    </Editor>
+  )
+}
+
+const commentTitles: Record<CleaningCommentKind, string> = {
+  note: 'Commentaire',
+  approved: 'Validation',
+  revision: 'Reprise demandée',
+}
+
+function CommentThread({ comments, add }: { comments: readonly CleaningComment[]; add?: () => void }) {
+  return (
+    <List
+      hasDividers
+      header={
+        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
+          <HStack gap={2} vAlign="center">
+            <Heading level={2}>Commentaires</Heading>
+            {comments.length > 0 && <Badge label={String(comments.length)} />}
+          </HStack>
+          {add && <Button size="sm" label="Commenter" onClick={add} />}
+        </HStack>
+      }
+    >
+      {comments.length ? (
+        comments.map((comment) => (
+          <ListItem
+            key={comment.id}
+            label={comment.body ? <Lines text={comment.body} /> : commentTitles[comment.kind]}
+            description={commentTitles[comment.kind] + ' · ' + comment.author + ', ' + timeLabel(comment.created_at)}
+            endContent={
+              comment.kind === 'approved' ? (
+                <Token label="Validé" color="green" size="sm" />
+              ) : comment.kind === 'revision' ? (
+                <Token label="À reprendre" color="red" size="sm" />
+              ) : undefined
+            }
+          />
+        ))
+      ) : (
+        <ListItem label="Aucun commentaire pour l’instant." />
+      )}
+    </List>
+  )
+}
+
 function Checklist({
   kind,
   items,
@@ -1598,7 +1849,9 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
     [day, agentId],
   )
   const sameDay = useQuery(day ? `cleaning:${day}:${day}:${agentId}:all` : '', loadDay)
-  const [dialog, setDialog] = useState<'edit' | 'checklist' | 'template' | 'finish' | 'cancel' | null>(null),
+  const [dialog, setDialog] = useState<
+      'edit' | 'checklist' | 'template' | 'finish' | 'cancel' | 'comment' | 'approved' | 'revision' | null
+    >(null),
     [issue, setIssue] = useState<CleaningItem | null>(null),
     [overrides, setOverrides] = useState<Record<string, CleaningItemState>>({}),
     [failure, setFailure] = useState(''),
@@ -1614,6 +1867,9 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
     )
   const items = detail.data.items.map((item) => (overrides[item.id] ? { ...item, state: overrides[item.id]! } : item))
   const editable = task.status === 'planned'
+  const reviewable = manager && task.status === 'done' && task.review !== 'approved'
+  const commentable = task.status !== 'cancelled'
+  const lastRevision = detail.data.comments.findLast((comment) => comment.kind === 'revision')
   const handled = items.filter((item) => item.state !== 'todo').length,
     issues = items.filter((item) => item.state === 'issue').length,
     remaining = items.length - handled
@@ -1686,6 +1942,13 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
     </HStack>
   ) : undefined
   const actions = [
+    ...(reviewable
+      ? [
+          { label: 'Valider', onClick: () => setDialog('approved') },
+          { label: 'Demander une reprise', onClick: () => setDialog('revision') },
+        ]
+      : []),
+    ...(commentable ? [{ label: 'Commenter', onClick: () => setDialog('comment') }] : []),
     ...(manager && task.status === 'done'
       ? [{ label: 'Rouvrir', onClick: () => status('planned', 'Tâche rouverte.') }]
       : []),
@@ -1712,6 +1975,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
             <HStack gap={2} vAlign="center" wrap="wrap">
               <Heading level={1}>{taskLot(task)}</Heading>
               <StateToken state={task.status} />
+              <ReviewToken task={task} />
               <PriorityToken priority={task.priority} />
             </HStack>
             <Text>
@@ -1728,6 +1992,17 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
             />
           ) : (
             <HStack gap={2} wrap="wrap">
+              {reviewable && (
+                <Button
+                  label="Valider"
+                  variant="primary"
+                  isDisabled={mutation.busy}
+                  onClick={() => setDialog('approved')}
+                />
+              )}
+              {reviewable && (
+                <Button label="Demander une reprise" isDisabled={mutation.busy} onClick={() => setDialog('revision')} />
+              )}
               {manager && task.status === 'done' && (
                 <Button
                   label="Rouvrir"
@@ -1780,16 +2055,31 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
       }
     >
       <Feedback error={failure || mutation.error} success={success} />
-      {task.note && (
-        <Banner status="info" title="Consigne">
-          <Lines text={task.note} />
-        </Banner>
+      {task.note && <Banner status="info" title="Consigne" description={<Lines text={task.note} />} />}
+      {task.status === 'planned' && task.review === 'revision' && lastRevision && (
+        <Banner
+          status="warning"
+          title={'Reprise demandée par ' + lastRevision.author}
+          description={<Lines text={lastRevision.body} />}
+        />
       )}
       {task.status === 'done' && task.completed_at && (
         <Text>
           Terminé par {task.completed_by} le {timeLabel(task.completed_at)}
           {task.report ? ' · ' + task.report : ''}
         </Text>
+      )}
+      {task.review === 'approved' && task.reviewed_at && (
+        <Text>
+          Validé par {task.reviewed_by} le {timeLabel(task.reviewed_at)}
+        </Text>
+      )}
+      {reviewable && (
+        <Banner
+          status="info"
+          title="À vérifier"
+          description="Le ménage est terminé : validez-le ou demandez une reprise."
+        />
       )}
       {items.length > 0 ? (
         <ProgressBar
@@ -1816,6 +2106,21 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           }
         />
       ))}
+      <CommentThread comments={detail.data.comments} add={commentable ? () => setDialog('comment') : undefined} />
+      {dialog === 'comment' && (
+        <CommentEditor task={task} close={() => setDialog(null)} saved={() => refreshed('Commentaire ajouté.')} />
+      )}
+      {(dialog === 'approved' || dialog === 'revision') && (
+        <ReviewEditor
+          task={task}
+          items={detail.data.items}
+          decision={dialog}
+          close={() => setDialog(null)}
+          saved={() =>
+            refreshed(dialog === 'approved' ? 'Ménage validé.' : 'Reprise demandée à ' + task.agent_name + '.')
+          }
+        />
+      )}
       {dialog === 'edit' && options.data && (
         <TaskEditor
           task={task}
@@ -1965,8 +2270,8 @@ export function CleaningTemplates() {
       header={
         <HStack gap={3} wrap="wrap" hAlign="between">
           <VStack gap={1}>
-            <Heading level={1}>Ménage</Heading>
-            <Text color="secondary">Fiches modèles : tâches à faire et points à vérifier dans chaque lot.</Text>
+            <Heading level={1}>Fiches de ménage</Heading>
+            <Text color="secondary">Tâches à faire et points à vérifier, copiés dans chaque ménage planifié.</Text>
           </VStack>
           <Button
             label="Nouvelle fiche"
@@ -1976,7 +2281,6 @@ export function CleaningTemplates() {
           />
         </HStack>
       }
-      navigation={<CleaningTabs current="templates" />}
     >
       {!options.data ? (
         <Loading error={options.error} retry={() => void options.refresh()} />

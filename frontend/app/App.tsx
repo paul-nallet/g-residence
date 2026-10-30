@@ -50,7 +50,7 @@ import { CommandBar } from '../command/CommandBar.tsx'
 import { useMobile } from '../lib/useMobile.ts'
 import { useCrumb } from './crumb.ts'
 import { PageLayout } from './PageLayout.tsx'
-import { navGroups, sections } from './sections.ts'
+import { navGroups, sectionPages, sections } from './sections.ts'
 import { ThemeSelector, type ThemeMode } from './ThemeSelector.tsx'
 
 const subscribe = (notify: () => void) => {
@@ -233,15 +233,34 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
             const items = visible.filter((item) => item.group === group.id)
             return items.length ? (
               <SideNavSection key={group.id} title={group.title} isHeaderHidden={group.isHeaderHidden}>
-                {items.map((item) => (
-                  <SideNavItem
-                    key={item.id}
-                    label={item.label}
-                    icon={item.icon}
-                    href={'#' + item.id}
-                    isSelected={item.id === section.id}
-                  />
-                ))}
+                {items.map((item) => {
+                  const pages = (sectionPages[item.id] ?? []).filter(
+                    (page) => !page.managerOnly || me.role !== 'cleaner',
+                  )
+                  return pages.length > 1 ? (
+                    <SideNavItem key={item.id} label={item.label} icon={item.icon}>
+                      {pages.map((page) => (
+                        <SideNavItem
+                          key={page.id}
+                          label={page.label}
+                          href={'#' + item.id + (page.id ? '/' + page.id : '')}
+                          isSelected={
+                            item.id === section.id &&
+                            (page.id ? id === page.id : !pages.some((other) => other.id && other.id === id))
+                          }
+                        />
+                      ))}
+                    </SideNavItem>
+                  ) : (
+                    <SideNavItem
+                      key={item.id}
+                      label={item.label}
+                      icon={item.icon}
+                      href={'#' + item.id}
+                      isSelected={item.id === section.id}
+                    />
+                  )
+                })}
               </SideNavSection>
             ) : null
           })}

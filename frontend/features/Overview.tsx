@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { ClickableCard } from '@astryxdesign/core/ClickableCard'
+import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { Grid } from '@astryxdesign/core/Grid'
 import { Heading } from '@astryxdesign/core/Heading'
@@ -16,6 +17,7 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
+  ClipboardCheck,
   ClipboardList,
   Coffee,
   Droplets,
@@ -25,7 +27,7 @@ import {
 } from 'lucide-react'
 import type { Me } from '../../src/domain/accounts.ts'
 import { type Event, OVERDUE_LIMIT } from '../../src/domain/agenda.ts'
-import type { CleaningTask } from '../../src/domain/cleaning.ts'
+import { type CleaningTask, REVIEW_LIMIT } from '../../src/domain/cleaning.ts'
 import { addDays, today } from '../../src/domain/rules.ts'
 import { call } from '../lib/api.ts'
 import { useQuery } from '../lib/data.ts'
@@ -74,22 +76,50 @@ export function Overview({ me }: { me: Me }) {
     manager = me.role !== 'cleaner',
     [showDone, setShowDone] = useState(readShowDone),
     load = useCallback(async () => {
-      const [lots, occupied, events, overdue, cleaning, late, stock, meters, metersPending, issues, works, revenue] =
-        await Promise.all([
-          call((client) => client.lots.list({ query: {} })),
-          call((client) => client.lots.list({ query: { state: 'occupied' } })),
-          call((client) => client.calendar.list({ query: { from: date, to: addDays(date, 6) } })),
-          manager ? call((client) => client.calendar.overdue()) : [],
-          call((client) => client.cleaning.tasks({ query: { from: date, to: date } })),
-          call((client) => client.cleaning.tasks({ query: { from: addDays(date, -7), to: addDays(date, -1) } })),
-          manager ? call((client) => client.stock.list({ query: { level: 'alert' } })) : null,
-          manager ? call((client) => client.meters.list({ query: { month } })) : null,
-          manager ? call((client) => client.meters.list({ query: { month, pending: 'true' } })) : null,
-          manager ? call((client) => client.technical.issues({ query: { status: 'open' } })) : null,
-          manager ? call((client) => client.technical.works({ query: { status: 'active' } })) : null,
-          manager ? call((client) => client.revenue.list({ query: { month } })) : null,
-        ])
-      return { lots, occupied, events, overdue, cleaning, late, stock, meters, metersPending, issues, works, revenue }
+      const [
+        lots,
+        occupied,
+        events,
+        overdue,
+        cleaning,
+        late,
+        reviews,
+        stock,
+        meters,
+        metersPending,
+        issues,
+        works,
+        revenue,
+      ] = await Promise.all([
+        call((client) => client.lots.list({ query: {} })),
+        call((client) => client.lots.list({ query: { state: 'occupied' } })),
+        call((client) => client.calendar.list({ query: { from: date, to: addDays(date, 6) } })),
+        manager ? call((client) => client.calendar.overdue()) : [],
+        call((client) => client.cleaning.tasks({ query: { from: date, to: date } })),
+        call((client) => client.cleaning.tasks({ query: { from: addDays(date, -7), to: addDays(date, -1) } })),
+        manager ? call((client) => client.cleaning.reviews()) : [],
+        manager ? call((client) => client.stock.list({ query: { level: 'alert' } })) : null,
+        manager ? call((client) => client.meters.list({ query: { month } })) : null,
+        manager ? call((client) => client.meters.list({ query: { month, pending: 'true' } })) : null,
+        manager ? call((client) => client.technical.issues({ query: { status: 'open' } })) : null,
+        manager ? call((client) => client.technical.works({ query: { status: 'active' } })) : null,
+        manager ? call((client) => client.revenue.list({ query: { month } })) : null,
+      ])
+      return {
+        lots,
+        occupied,
+        events,
+        overdue,
+        cleaning,
+        late,
+        reviews,
+        stock,
+        meters,
+        metersPending,
+        issues,
+        works,
+        revenue,
+      }
     }, [date, month, manager]),
     result = useQuery('overview:' + date, load)
 
@@ -163,6 +193,15 @@ export function Overview({ me }: { me: Me }) {
                 : []),
               ...(manager
                 ? ([
+                    {
+                      key: 'reviews',
+                      tone: 'warning',
+                      icon: ClipboardCheck,
+                      label: 'Ménages à valider',
+                      description: 'Ménages terminés en attente de votre vérification : dépliez la liste ci-dessous.',
+                      done: 'Tous les ménages terminés sont vérifiés.',
+                      count: data.reviews.length,
+                    },
                     {
                       key: 'issues',
                       tone: 'warning',
@@ -289,6 +328,47 @@ export function Overview({ me }: { me: Me }) {
                     <EventItem key={event.id} event={event} withDate />
                   ))}
                 </List>
+              )}
+
+              {data.reviews.length > 0 && (
+                <Collapsible
+                  defaultIsOpen={false}
+                  chevronPosition="start"
+                  trigger={
+                    <HStack gap={2} vAlign="center">
+                      <Heading level={2}>Ménages à valider</Heading>
+                      <Badge
+                        variant="warning"
+                        label={data.reviews.length >= REVIEW_LIMIT ? REVIEW_LIMIT + '+' : data.reviews.length}
+                      />
+                    </HStack>
+                  }
+                >
+                  <List hasDividers>
+                    {data.reviews.map((task) => (
+                      <ListItem
+                        key={task.id}
+                        startContent={<Icon icon={ClipboardCheck} />}
+                        label={lotLabel(task)}
+                        description={
+                          dateLabel(task.day) +
+                          ' · ' +
+                          task.agent_name +
+                          (task.total ? ' · ' + task.handled + '/' + task.total + ' points' : '')
+                        }
+                        href={'#cleaning/' + task.id}
+                        endContent={
+                          <HStack gap={2} vAlign="center">
+                            {task.issues > 0 && (
+                              <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
+                            )}
+                            <CommentIcon comments={taskComments(task)} />
+                          </HStack>
+                        }
+                      />
+                    ))}
+                  </List>
+                </Collapsible>
               )}
 
               <Grid columns={{ minWidth: 140, max: 4 }} gap={3}>
