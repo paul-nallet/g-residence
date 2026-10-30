@@ -3,9 +3,12 @@ import { Context, Effect, Layer } from 'effect'
 import {
   CleaningAgentInvalid,
   CleaningAlreadyPlanned,
+  type CleaningBulk,
+  type CleaningChecklist,
   CleaningDayTaken,
   CleaningIncomplete,
   type CleaningItem,
+  type CleaningItemKind,
   CleaningItemNotFound,
   type CleaningItemState,
   CleaningLocked,
@@ -40,6 +43,7 @@ const taskOf = (row: TaskRow): CleaningTask => ({ ...row, remarks: JSON.parse(ro
 const visible = (me: Me) =>
   me.role === 'cleaner' ? { clause: ' AND t.agent_id=?', values: [me.id] } : { clause: '', values: [] }
 
+const placeholders = (values: readonly unknown[]) => values.map(() => '?').join(',')
 const insertItems = (me: Me, taskId: string, items: readonly CleaningPoint[], start = 0) =>
   items.map((item, index) =>
     sql(
@@ -302,9 +306,21 @@ const make = Effect.gen(function* () {
     if (explicit && !all.some((template) => template.id === input.template_id))
       return yield* new CleaningTemplateNotFound()
     const fallback = all.find((template) => template.is_default)
+    const taken = yield* db.all<{ lot_id: string; number: string }>(
+      sql(
+        `SELECT t.lot_id,l.number FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id
+        WHERE t.residence_id=? AND t.day=? AND t.status<>'cancelled' AND t.lot_id IN (${placeholders(lots)})
+        ORDER BY l.number COLLATE NOCASE`,
+        me.residenceId,
+        input.day,
+        ...lots,
+      ),
+    )
+    const free = lots.filter((lot) => !taken.some((row) => row.lot_id === lot))
+    if (!free.length) return yield* new CleaningDayTaken()
     const createdAt = yield* now
     yield* write(
-      lots.flatMap((lot) => {
+      free.flatMap((lot) => {
         const template =
           input.template_id === 'none'
             ? undefined
@@ -331,7 +347,25 @@ const make = Effect.gen(function* () {
         ]
       }),
     )
-    return { ok: true }
+    return { created: free.length, skipped: taken.map((row) => row.number) }
+  })
+
+  const movements = Effect.fn('Cleaning.movements')(function* (day: string) {
+    const me = yield* manager
+    const lotsWhere = (column: string) =>
+      db.all<{ lot_id: string }>(
+        sql(
+          `SELECT DISTINCT s.lot_id FROM stays s JOIN lots l ON l.id=s.lot_id
+          WHERE s.residence_id=? AND s.cancelled=0 AND l.archived=0 AND ${column}=?`,
+          me.residenceId,
+          day,
+        ),
+      )
+    const [departures, arrivals] = yield* Effect.all([
+      lotsWhere('COALESCE(s.actual_end,s.planned_end)'),
+      lotsWhere('COALESCE(s.actual_start,s.planned_start)'),
+    ])
+    return { departures: departures.map((row) => row.lot_id), arrivals: arrivals.map((row) => row.lot_id) }
   })
 
   const update = Effect.fn('Cleaning.update')(function* (
@@ -356,24 +390,59 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  const reschedule = Effect.fn('Cleaning.reschedule')(function* (input: {
-    readonly task_ids: readonly string[]
-    readonly day: string
-  }) {
+  const bulk = Effect.fn('Cleaning.bulk')(function* (input: typeof CleaningBulk.Type) {
     const me = yield* manager
     const ids = [...new Set(input.task_ids)]
-    for (const id of ids) yield* planned(yield* findTask(id))
+    const items = input.items ?? []
+    const changes = input.agent_id !== undefined || input.day !== undefined || input.priority !== undefined
+    if (!input.cancel && !changes && !items.length)
+      return yield* new InvalidInput({ message: 'Choisissez une modification à appliquer.' })
+    const found = yield* Effect.forEach(ids, findTask)
+    const targets = found.filter((row) => row.status === 'planned').map((row) => row.id)
+    if (!targets.length) return yield* new CleaningLocked()
+    const next = items.length
+      ? yield* db.all<{ task_id: string; next: number }>(
+          sql(
+            `SELECT task_id,MAX(position)+1 AS next FROM cleaning_task_items
+            WHERE residence_id=? AND task_id IN (${placeholders(targets)}) GROUP BY task_id`,
+            me.residenceId,
+            ...targets,
+          ),
+        )
+      : []
+    const day = input.day ?? null
     yield* write(
-      ids.map((id) =>
-        sql(
-          'UPDATE cleaning_tasks SET day=?,position=NULL WHERE id=? AND residence_id=?',
-          input.day,
-          id,
-          me.residenceId,
-        ),
+      targets.flatMap((id) =>
+        input.cancel
+          ? [
+              sql(
+                `UPDATE cleaning_tasks SET status='cancelled' WHERE id=? AND residence_id=? AND status='planned'`,
+                id,
+                me.residenceId,
+              ),
+            ]
+          : [
+              ...(changes
+                ? [
+                    sql(
+                      `UPDATE cleaning_tasks SET agent_id=COALESCE(?,agent_id),day=COALESCE(?,day),
+                      position=CASE WHEN ? IS NULL OR ?=day THEN position END,priority=COALESCE(?,priority)
+                      WHERE id=? AND residence_id=? AND status='planned'`,
+                      input.agent_id ?? null,
+                      day,
+                      day,
+                      day,
+                      input.priority ?? null,
+                      id,
+                      me.residenceId,
+                    ),
+                  ]
+                : []),
+              ...insertItems(me, id, items, next.find((row) => row.task_id === id)?.next ?? 0),
+            ],
       ),
     )
-    return { ok: true }
+    return { updated: targets.length, skipped: ids.length - targets.length }
   })
 
   const order = Effect.fn('Cleaning.order')(function* (input: {
@@ -452,20 +521,58 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  const addItem = Effect.fn('Cleaning.addItem')(function* (taskId: string, input: CleaningPoint) {
-    const me = yield* manager
+  const checkAll = Effect.fn('Cleaning.checkAll')(function* (taskId: string, kind: CleaningItemKind) {
+    const me = yield* CurrentUser
     yield* planned(yield* findTask(taskId))
-    const position = yield* db.first<{ next: number }>(
-      sql('SELECT COALESCE(MAX(position)+1,0) AS next FROM cleaning_task_items WHERE task_id=?', taskId),
-    )
-    yield* write(insertItems(me, taskId, [input], position?.next ?? 0))
+    yield* write([
+      sql(
+        `UPDATE cleaning_task_items SET state='done',note='',updated_by=?,updated_at=?
+        WHERE task_id=? AND residence_id=? AND kind=? AND state='todo'`,
+        me.id,
+        yield* now,
+        taskId,
+        me.residenceId,
+        kind,
+      ),
+    ])
     return { ok: true }
   })
 
-  const removeItem = Effect.fn('Cleaning.removeItem')(function* (itemId: string) {
+  const checklist = Effect.fn('Cleaning.checklist')(function* (taskId: string, input: typeof CleaningChecklist.Type) {
     const me = yield* manager
-    yield* planned(yield* findItem(itemId))
-    yield* write([sql('DELETE FROM cleaning_task_items WHERE id=? AND residence_id=?', itemId, me.residenceId)])
+    yield* planned(yield* findTask(taskId))
+    const current = yield* db.all<{ id: string }>(
+      sql('SELECT id FROM cleaning_task_items WHERE task_id=? AND residence_id=?', taskId, me.residenceId),
+    )
+    const kept = input.items.flatMap((item) => (item.id ? [item.id] : []))
+    if (new Set(kept).size !== kept.length || kept.some((id) => !current.some((row) => row.id === id)))
+      return yield* new CleaningItemNotFound()
+    yield* write([
+      ...current
+        .filter((row) => !kept.includes(row.id))
+        .map((row) => sql('DELETE FROM cleaning_task_items WHERE id=? AND residence_id=?', row.id, me.residenceId)),
+      ...input.items.flatMap((item, index) =>
+        item.id
+          ? [
+              sql(
+                `UPDATE cleaning_task_items SET label=?,position=?,
+                state=CASE WHEN kind=? THEN state ELSE 'todo' END,note=CASE WHEN kind=? THEN note ELSE '' END,
+                updated_by=CASE WHEN kind=? THEN updated_by END,updated_at=CASE WHEN kind=? THEN updated_at END,kind=?
+                WHERE id=? AND residence_id=?`,
+                item.label,
+                index,
+                item.kind,
+                item.kind,
+                item.kind,
+                item.kind,
+                item.kind,
+                item.id,
+                me.residenceId,
+              ),
+            ]
+          : insertItems(me, taskId, [item], index),
+      ),
+    ])
     return { ok: true }
   })
 
@@ -478,14 +585,15 @@ const make = Effect.gen(function* () {
     tasks,
     lotTasks,
     create,
+    movements,
     task,
     update,
-    reschedule,
+    bulk,
     order,
     setStatus,
     updateItem,
-    addItem,
-    removeItem,
+    checkAll,
+    checklist,
   }
 })
 

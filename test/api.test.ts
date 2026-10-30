@@ -1291,11 +1291,7 @@ test('ménage : fiches, planning, checklist, réalisation par l’agent et isola
         .status,
       403,
     )
-    assert.equal(
-      (await e.request('/cleaning/tasks/' + taskId + '/items', 'POST', { kind: 'task', label: 'Vitres' }, cleaner))
-        .status,
-      403,
-    )
+    assert.equal((await e.request('/cleaning/tasks/' + taskId + '/items', 'PUT', { items: [] }, cleaner)).status, 403)
     assert.equal(
       (await e.request('/cleaning/items/' + detail.items[0]!.id, 'PATCH', { state: 'done', note: '' }, cleaner)).status,
       200,
@@ -1345,7 +1341,7 @@ test('ménage : fiches, planning, checklist, réalisation par l’agent et isola
 
     const group = all.filter((t) => t.lot_number !== '101').map((t) => t.id)
     const reschedule = (task_ids: string[], day: string, as = e.cookie) =>
-      e.request('/cleaning/tasks/reschedule', 'POST', { task_ids, day }, as)
+      e.request('/cleaning/tasks/bulk', 'POST', { task_ids, day }, as)
     assert.equal((await reschedule(group, '2026-10-14', cleaner)).status, 403)
     assert.equal((await reschedule([], '2026-10-14')).status, 400)
     assert.equal((await reschedule(group, '2026-10-14')).status, 200)
@@ -1375,7 +1371,8 @@ test('ménage : fiches, planning, checklist, réalisation par l’agent et isola
       (await e.request('/cleaning/tasks/' + group[1] + '/status', 'POST', { status: 'cancelled', report: '' })).status,
       200,
     )
-    assert.equal((await reschedule(group, '2026-10-16')).status, 409)
+    const partial = await reschedule(group, '2026-10-16')
+    assert.deepEqual([partial.status, await partial.json()], [200, { updated: 1, skipped: 1 }])
     assert.equal((await e.request('/cleaning/templates/' + standardId, 'DELETE')).status, 200)
     const remaining = (await (await e.request('/cleaning/tasks/' + taskId)).json()) as { items: unknown[] }
     assert.equal(remaining.items.length, 2)
@@ -1454,7 +1451,7 @@ test('ordre de passage ménage : tri manuel dans la journée, remis à zéro au 
       400,
     )
     assert.equal(
-      (await e.request('/cleaning/tasks/reschedule', 'POST', { day: '2026-10-13', task_ids: [ids.C] })).status,
+      (await e.request('/cleaning/tasks/bulk', 'POST', { day: '2026-10-13', task_ids: [ids.C] })).status,
       200,
     )
     assert.deepEqual(await list(), [
@@ -1561,10 +1558,7 @@ test('priorités ménage : création multiple, filtre agent, correction, report 
         .status,
       200,
     )
-    assert.equal(
-      (await e.request('/cleaning/tasks/reschedule', 'POST', { task_ids: [task], day: '2026-10-13' })).status,
-      200,
-    )
+    assert.equal((await e.request('/cleaning/tasks/bulk', 'POST', { task_ids: [task], day: '2026-10-13' })).status, 200)
     const detail = (await (await e.request('/cleaning/tasks/' + task)).json()) as {
       task: { priority: string; day: string }
     }
@@ -1622,6 +1616,149 @@ test('priorités ménage : création multiple, filtre agent, correction, report 
       ).status,
       400,
     )
+  } finally {
+    await e.dispose()
+  }
+})
+
+test('ménage en masse : planification tolérante, mouvements du jour, modification groupée et checklist', async () => {
+  const e = await environment()
+  try {
+    const invite = await e.request('/team/invitations', 'POST', { email: 'masse@example.test', role: 'cleaner' })
+    const { token } = (await invite.json()) as { token: string }
+    const accept = await e.request(
+      '/auth/invitations/' + token,
+      'POST',
+      { name: 'Agent', password: 'Validation-seulement-2026' },
+      '',
+    )
+    const cleaner = accept.headers.get('set-cookie')!.split(';')[0]!
+    const { id: agent } = (await accept.json()) as { id: string }
+    const admin = (e.sqlite.prepare("SELECT id FROM users WHERE role='admin'").get() as { id: string }).id
+    const lot = async (number: string) => {
+      await e.request('/lots', 'POST', { building_id: 'test-building', number, floor: '', type: '' })
+      return (e.sqlite.prepare('SELECT id FROM lots WHERE number=?').get(number) as { id: string }).id
+    }
+    const lots = { A: await lot('A'), B: await lot('B'), C: await lot('C') }
+    await e.request('/lots/' + lots.A + '/stays', 'POST', {
+      first_name: 'Jean',
+      last_name: 'Départ',
+      planned_start: '2026-09-01',
+      planned_end: '2026-10-12',
+    })
+    await e.request('/lots/' + lots.B + '/stays', 'POST', {
+      first_name: 'Marie',
+      last_name: 'Arrivée',
+      planned_start: '2026-10-12',
+      planned_end: null,
+    })
+    const movements = await e.request('/cleaning/movements?day=2026-10-12')
+    assert.deepEqual(await movements.json(), { departures: [lots.A], arrivals: [lots.B] })
+    assert.equal((await e.request('/cleaning/movements?day=2026-10-12', 'GET', undefined, cleaner)).status, 403)
+
+    const input = { agent_id: agent, day: '2026-10-12', template_id: 'none', note: '' }
+    await e.request('/cleaning/tasks', 'POST', { ...input, lot_ids: [lots.B] })
+    const created = await e.request('/cleaning/tasks', 'POST', {
+      ...input,
+      lot_ids: [lots.A, lots.B, lots.C],
+      items: [{ kind: 'task', label: 'Aspirer' }],
+    })
+    assert.deepEqual([created.status, await created.json()], [200, { created: 2, skipped: ['B'] }])
+    assert.equal((await e.request('/cleaning/tasks', 'POST', { ...input, lot_ids: [lots.A] })).status, 409)
+
+    const day = '/cleaning/tasks?from=2026-10-12&to=2026-10-12'
+    const ids = Object.fromEntries(
+      ((await (await e.request(day)).json()) as { id: string; lot_number: string }[]).map((task) => [
+        task.lot_number,
+        task.id,
+      ]),
+    ) as { A: string; B: string; C: string }
+    const bulk = (payload: object, as = e.cookie) => e.request('/cleaning/tasks/bulk', 'POST', payload, as)
+    assert.equal((await bulk({ task_ids: [ids.A], priority: 'high' }, cleaner)).status, 403)
+    assert.equal((await bulk({ task_ids: [ids.A] })).status, 400)
+    const changed = await bulk({
+      task_ids: [ids.A, ids.C],
+      agent_id: admin,
+      priority: 'urgent',
+      items: [{ kind: 'check', label: 'Détecteur de fumée' }],
+    })
+    assert.deepEqual([changed.status, await changed.json()], [200, { updated: 2, skipped: 0 }])
+    const tasks = (await (await e.request(day)).json()) as {
+      id: string
+      agent_id: string
+      priority: string
+      total: number
+    }[]
+    assert.deepEqual(
+      [ids.A, ids.C].map((id) => {
+        const task = tasks.find((row) => row.id === id)!
+        return [task.agent_id, task.priority, task.total]
+      }),
+      [
+        [admin, 'urgent', 2],
+        [admin, 'urgent', 2],
+      ],
+    )
+    assert.equal((await bulk({ task_ids: [ids.A], agent_id: 'inconnu' })).status, 400)
+
+    type Detail = { items: { id: string; kind: string; label: string; state: string }[] }
+    const detail = async (id: string, as = e.cookie) =>
+      (await (await e.request('/cleaning/tasks/' + id, 'GET', undefined, as)).json()) as Detail
+    const [aspirer, detecteur] = (await detail(ids.A)).items
+    await e.request('/cleaning/items/' + aspirer!.id, 'PATCH', { state: 'done', note: '' })
+    await e.request('/cleaning/items/' + detecteur!.id, 'PATCH', { state: 'issue', note: 'Pile' })
+    const checklist = (items: object[], as = e.cookie) =>
+      e.request('/cleaning/tasks/' + ids.A + '/items', 'PUT', { items }, as)
+    assert.equal((await checklist([], cleaner)).status, 403)
+    assert.equal((await checklist([{ id: 'inconnu', kind: 'task', label: 'X' }])).status, 404)
+    assert.equal(
+      (
+        await checklist([
+          { id: detecteur!.id, kind: 'task', label: 'Changer la pile' },
+          { kind: 'check', label: 'Fenêtres fermées' },
+          { id: aspirer!.id, kind: 'task', label: 'Aspirer les sols' },
+        ])
+      ).status,
+      200,
+    )
+    assert.deepEqual(
+      (await detail(ids.A)).items.map(({ kind, label, state }) => [kind, label, state]),
+      [
+        ['task', 'Changer la pile', 'todo'],
+        ['check', 'Fenêtres fermées', 'todo'],
+        ['task', 'Aspirer les sols', 'done'],
+      ],
+    )
+
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + ids.B + '/items/done', 'POST', { kind: 'task' }, cleaner)).status,
+      200,
+    )
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + ids.A + '/items/done', 'POST', { kind: 'check' }, cleaner)).status,
+      404,
+    )
+    assert.equal((await e.request('/cleaning/tasks/' + ids.A + '/items/done', 'POST', { kind: 'check' })).status, 200)
+    assert.deepEqual(
+      (await detail(ids.A)).items.map(({ state }) => state),
+      ['todo', 'done', 'done'],
+    )
+
+    const calendar = async (as: string) =>
+      (
+        (await (await e.request('/calendar?from=2026-10-12&to=2026-10-12', 'GET', undefined, as)).json()) as {
+          kind: string
+          lotNumber: string
+        }[]
+      )
+        .filter((event) => event.kind === 'cleaning')
+        .map((event) => event.lotNumber)
+    assert.deepEqual([await calendar(cleaner), await calendar(e.cookie)], [['B'], []])
+
+    const cancelled = await bulk({ task_ids: [ids.A, ids.B], cancel: true })
+    assert.deepEqual([cancelled.status, await cancelled.json()], [200, { updated: 2, skipped: 0 }])
+    assert.equal((await bulk({ task_ids: [ids.A, ids.B], priority: 'low' })).status, 409)
+    assert.deepEqual(await calendar(cleaner), [])
   } finally {
     await e.dispose()
   }

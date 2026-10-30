@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Event } from '../../src/domain/agenda.ts'
 import type { Role } from '../../src/domain/accounts.ts'
 import { today } from '../../src/domain/rules.ts'
+import { useMobile } from '../lib/useMobile.ts'
 import { Feedback, roleLabels } from './status.tsx'
 
 export { Feedback, Loading, roleLabels } from './status.tsx'
@@ -31,17 +32,20 @@ export const kindLabels = {
   inspection_exit: 'État des lieux de sortie',
   intervention: 'Intervention technique',
   technical_visit: 'Visite technique',
+  cleaning: 'Ménage',
 }
 export const eventSubject = (event: Event) =>
   event.kind === 'intervention' || event.kind === 'technical_visit'
     ? (event.title ?? '') + (event.place ? ' · ' + event.place : '')
     : 'Lot ' + event.lotNumber
 export const eventHref = (event: Event) =>
-  event.kind === 'technical_visit'
-    ? '#visits/' + event.visitId
-    : event.kind === 'intervention'
-      ? '#technical/travaux/' + event.workId
-      : '#lots/' + event.lotId
+  event.kind === 'cleaning'
+    ? '#cleaning/' + event.id
+    : event.kind === 'technical_visit'
+      ? '#visits/' + event.visitId
+      : event.kind === 'intervention'
+        ? '#technical/travaux/' + event.workId
+        : '#lots/' + event.lotId
 export const statusLabels = {
   planned: 'Prévu',
   done: 'Réalisé',
@@ -112,6 +116,7 @@ export function Editor({
   error,
   label = 'Enregistrer',
   disabled = false,
+  width = 560,
 }: {
   title: string
   children: ReactNode
@@ -121,7 +126,9 @@ export function Editor({
   error: string
   label?: string
   disabled?: boolean
+  width?: number
 }) {
+  const mobile = useMobile()
   return (
     <Dialog
       isOpen
@@ -129,7 +136,8 @@ export function Editor({
         if (!open && !busy) close()
       }}
       purpose="form"
-      width={560}
+      variant={mobile ? 'fullscreen' : 'standard'}
+      width={width}
       padding={6}
     >
       <VStack
@@ -150,7 +158,16 @@ export function Editor({
         </StackItem>
         <HStack gap={2} wrap="wrap" hAlign="end">
           <Button label="Annuler" onClick={close} isDisabled={busy} />
-          <Button label={label} variant="primary" type="submit" isLoading={busy} isDisabled={busy || disabled} />
+          <StackItem size={mobile ? 'fill' : undefined}>
+            <Button
+              label={label}
+              variant="primary"
+              type="submit"
+              width={mobile ? '100%' : undefined}
+              isLoading={busy}
+              isDisabled={busy || disabled}
+            />
+          </StackItem>
         </HStack>
       </VStack>
     </Dialog>

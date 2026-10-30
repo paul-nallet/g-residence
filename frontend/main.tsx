@@ -48,6 +48,14 @@ const residenceTheme = defineTheme({
     '--color-border-emphasized': ['#bfc2c4', '#2a4a59'],
     '--color-skeleton': ['#eceee9', '#0f3a4e'],
   },
+  adaptations: {
+    rules: [
+      {
+        when: { pointer: 'coarse' },
+        value: { tokens: { '--size-element-sm': '36px', '--size-element-md': '44px', '--size-element-lg': '48px' } },
+      },
+    ],
+  },
   components: {
     'app-shell-sidenav': {
       base: { backgroundColor: 'var(--color-background-body)' },

@@ -1,11 +1,13 @@
 import type { Priority } from '../../src/domain/priority.ts'
 import { PriorityField, PriorityFilter, PriorityToken, type PriorityFilterValue } from './priority.tsx'
-import { useCallback, useState } from 'react'
+import { type ClipboardEvent, useCallback, useRef, useState } from 'react'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
+import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList'
+import { ClickableCard } from '@astryxdesign/core/ClickableCard'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -18,13 +20,20 @@ import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/Segme
 import { Selector } from '@astryxdesign/core/Selector'
 import { HStack, StackItem, VStack } from '@astryxdesign/core/Stack'
 import { Tab, TabList } from '@astryxdesign/core/TabList'
-import { Table, proportional, useTablePagination } from '@astryxdesign/core/Table'
+import {
+  Table,
+  TableSelectionToolbar,
+  proportional,
+  useTablePagination,
+  useTableSelection,
+} from '@astryxdesign/core/Table'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
+import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 import { Token } from '@astryxdesign/core/Token'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
-import { ArrowDown, ArrowUp, MessageSquareText, Trash2 } from 'lucide-react'
+import { Check, MessageSquareText, Plus, Trash2, X } from 'lucide-react'
 import type {
   CleaningItem,
   CleaningItemKind,
@@ -37,15 +46,20 @@ import type { Me } from '../../src/domain/accounts.ts'
 import { addDays, monday, today } from '../../src/domain/rules.ts'
 import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
-import { call } from '../lib/api.ts'
+import { call, messageOf } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { useHashParam } from '../lib/hashParams.ts'
+import { checkForChanges } from '../lib/sync.ts'
+import { useMobile } from '../lib/useMobile.ts'
 import { DateField, dateLabel, Editor, Feedback, Loading, PeriodNav, roleLabels, StateToken } from './shared.tsx'
 
+const kinds = ['task', 'check'] as const
+const kindTitles: Record<CleaningItemKind, string> = { task: 'À faire', check: 'À vérifier' }
 const stateLabels: Record<CleaningItemKind, Record<CleaningItemState, string>> = {
   task: { todo: 'À faire', done: 'Fait', issue: 'Non fait' },
   check: { todo: 'À vérifier', done: 'Conforme', issue: 'Anomalie' },
 }
+const examples: Record<CleaningItemKind, string> = { task: 'Aspirer les sols', check: 'Ampoules fonctionnelles' }
 const dayLabel = (date: string) =>
   new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(
     new Date(date),
@@ -60,6 +74,7 @@ const timeLabel = (instant: string) =>
   }).format(new Date(instant))
 const lotLabel = (lot: { number: string; building_name: string }) =>
   'Lot ' + lot.number + (lot.building_name ? ' · ' + lot.building_name : '')
+const taskLot = (task: CleaningTask) => lotLabel({ number: task.lot_number, building_name: task.building_name })
 const plural = (count: number, one: string, many: string) => count + ' ' + (count > 1 ? many : one)
 const pointsSummary = (items: readonly { kind: CleaningItemKind }[]) => {
   const tasks = items.filter((item) => item.kind === 'task').length
@@ -67,6 +82,26 @@ const pointsSummary = (items: readonly { kind: CleaningItemKind }[]) => {
 }
 const loadOptions = () => call((client) => client.cleaning.options())
 const noOptions = () => Promise.resolve(null)
+
+const agentKey = 'cleaning-agent'
+const rememberedAgent = () => {
+  try {
+    return localStorage.getItem(agentKey) ?? ''
+  } catch {
+    return ''
+  }
+}
+const rememberAgent = (id: string) => {
+  try {
+    localStorage.setItem(agentKey, id)
+  } catch {
+    return
+  }
+}
+const defaultAgent = (agents: CleaningOptions['agents'], ...preferred: string[]) => {
+  const cleaners = agents.filter((agent) => agent.role === 'cleaner')
+  return preferred.find((id) => cleaners.some((agent) => agent.id === id)) ?? cleaners[0]?.id ?? ''
+}
 
 function CleaningTabs({ current }: { current: 'planning' | 'templates' }) {
   return (
@@ -77,88 +112,183 @@ function CleaningTabs({ current }: { current: 'planning' | 'templates' }) {
   )
 }
 
-type Row = { key: string; kind: CleaningItemKind; label: string }
+const agentOption = (agent: CleaningOptions['agents'][number]) => ({
+  value: agent.id,
+  label: agent.name,
+  description: roleLabels[agent.role],
+})
+function AgentField({
+  agents,
+  value,
+  onChange,
+}: {
+  agents: CleaningOptions['agents']
+  value: string
+  onChange: (value: string) => void
+}) {
+  const cleaners = agents.filter((agent) => agent.role === 'cleaner'),
+    others = agents.filter((agent) => agent.role !== 'cleaner')
+  return (
+    <VStack gap={2}>
+      <Selector
+        label="Agent"
+        value={value}
+        onChange={onChange}
+        placeholder="Choisir un agent"
+        presentation="adaptive"
+        options={[
+          ...(cleaners.length
+            ? [{ type: 'section' as const, title: 'Agents de ménage', options: cleaners.map(agentOption) }]
+            : []),
+          ...(others.length
+            ? [{ type: 'section' as const, title: 'Autres membres', options: others.map(agentOption) }]
+            : []),
+        ]}
+      />
+      {!cleaners.length && (
+        <Banner
+          status="warning"
+          title="Aucun agent de ménage"
+          description="Invitez un compte de rôle Ménage depuis Équipe, ou choisissez un autre membre."
+        />
+      )}
+    </VStack>
+  )
+}
 
-function PointRows({
-  title,
-  description,
-  empty,
+type Row = { key: string; id?: string; kind: CleaningItemKind; label: string }
+const newRow = (kind: CleaningItemKind, label = ''): Row => ({ key: crypto.randomUUID(), kind, label })
+const rowsOf = (items: readonly { id?: string; kind: CleaningItemKind; label: string }[]): Row[] =>
+  items.map((item) => ({ ...item, key: crypto.randomUUID() }))
+const pointsOf = (rows: readonly Row[]) =>
+  kinds.flatMap((kind) =>
+    rows
+      .filter((row) => row.kind === kind && row.label.trim())
+      .map(({ id, label }) => ({ ...(id ? { id } : {}), kind, label: label.trim() })),
+  )
+
+function ChecklistEditor({
   rows,
   setRows,
+  description,
 }: {
-  title: string
-  description?: string
-  empty: string
   rows: readonly Row[]
   setRows: (update: (current: Row[]) => Row[]) => void
+  description?: string
 }) {
-  const add = (kind: CleaningItemKind) =>
-    setRows((current) => [...current, { key: crypto.randomUUID(), kind, label: '' }])
+  const inputs = useRef(new Map<string, HTMLInputElement>())
+  const focus = useRef('')
+  const insert = (kind: CleaningItemKind, after?: string, labels = ['']) => {
+    const created = labels.map((label) => newRow(kind, label))
+    setRows((current) => {
+      const index = after ? current.findIndex((row) => row.key === after) + 1 : current.length
+      return [...current.slice(0, index), ...created, ...current.slice(index)]
+    })
+    focus.current = created[created.length - 1]!.key
+  }
   const change = (key: string, patch: Partial<Row>) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-  const move = (index: number, offset: number) =>
+  const remove = (key: string) => setRows((current) => current.filter((row) => row.key !== key))
+  const move = (key: string, offset: number) =>
     setRows((current) => {
-      const next = [...current]
-      const [row] = next.splice(index, 1)
-      next.splice(index + offset, 0, row!)
-      return next
+      const row = current.find((item) => item.key === key)!
+      const siblings = current.filter((item) => item.kind === row.kind)
+      const target = siblings[siblings.indexOf(row) + offset]
+      if (!target) return current
+      return current.map((item) => (item.key === key ? target : item.key === target.key ? row : item))
     })
   return (
-    <VStack gap={3}>
-      <VStack gap={1}>
-        <Heading level={3}>{title}</Heading>
-        {description && <Text color="secondary">{description}</Text>}
-      </VStack>
-      {rows.length === 0 && <Text color="secondary">{empty}</Text>}
-      {rows.map((row, index) => (
-        <HStack key={row.key} gap={2} vAlign="center">
-          <Selector
-            label={'Type du point ' + (index + 1)}
-            isLabelHidden
-            value={row.kind}
-            onChange={(value) => change(row.key, { kind: value as CleaningItemKind })}
-            options={[
-              { value: 'task', label: 'À faire' },
-              { value: 'check', label: 'À vérifier' },
-            ]}
-          />
-          <StackItem size="fill">
-            <TextInput
-              label={'Intitulé du point ' + (index + 1)}
-              isLabelHidden
-              width="100%"
-              value={row.label}
-              onChange={(value) => change(row.key, { label: value })}
-              hasAutoFocus={!row.label && index === rows.length - 1}
-              placeholder={row.kind === 'task' ? 'Aspirer les sols' : 'Ampoules fonctionnelles'}
-            />
-          </StackItem>
-          <IconButton
-            label={'Monter le point ' + (index + 1)}
-            icon={<Icon icon={ArrowUp} />}
-            variant="ghost"
-            isDisabled={index === 0}
-            onClick={() => move(index, -1)}
-          />
-          <IconButton
-            label={'Descendre le point ' + (index + 1)}
-            icon={<Icon icon={ArrowDown} />}
-            variant="ghost"
-            isDisabled={index === rows.length - 1}
-            onClick={() => move(index, 1)}
-          />
-          <IconButton
-            label={'Supprimer le point ' + (index + 1)}
-            icon={<Icon icon={Trash2} />}
-            variant="ghost"
-            onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
-          />
-        </HStack>
-      ))}
-      <HStack gap={2} wrap="wrap">
-        <Button label="Ajouter une tâche à faire" onClick={() => add('task')} />
-        <Button label="Ajouter une vérification" onClick={() => add('check')} />
-      </HStack>
+    <VStack gap={4}>
+      {description && <Text color="secondary">{description}</Text>}
+      {kinds.map((kind) => {
+        const list = rows.filter((row) => row.kind === kind)
+        return (
+          <VStack key={kind} gap={2}>
+            <HStack gap={2} vAlign="center">
+              <Heading level={3}>{kindTitles[kind]}</Heading>
+              <Badge label={String(list.filter((row) => row.label.trim()).length)} />
+            </HStack>
+            {list.map((row, index) => {
+              const name = kindTitles[kind] + ', point ' + (index + 1)
+              return (
+                <HStack key={row.key} gap={1} vAlign="center">
+                  <StackItem size="fill">
+                    <TextInput
+                      ref={(element: HTMLInputElement | null) => {
+                        if (!element) return void inputs.current.delete(row.key)
+                        inputs.current.set(row.key, element)
+                        if (focus.current !== row.key) return
+                        focus.current = ''
+                        element.focus()
+                      }}
+                      label={name}
+                      isLabelHidden
+                      width="100%"
+                      value={row.label}
+                      placeholder={examples[kind]}
+                      onChange={(value) => change(row.key, { label: value })}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          insert(kind, row.key)
+                        } else if (event.key === 'Backspace' && !row.label) {
+                          event.preventDefault()
+                          remove(row.key)
+                          const previous = list[index - 1]
+                          if (previous) inputs.current.get(previous.key)?.focus()
+                        }
+                      }}
+                      onPaste={(event: ClipboardEvent<HTMLInputElement>) => {
+                        const lines = event.clipboardData
+                          .getData('text')
+                          .split(/\r?\n/)
+                          .map((line) => line.trim())
+                          .filter(Boolean)
+                        if (lines.length < 2) return
+                        event.preventDefault()
+                        change(row.key, { label: row.label + lines[0] })
+                        insert(kind, row.key, lines.slice(1))
+                      }}
+                    />
+                  </StackItem>
+                  <IconButton
+                    label={'Supprimer : ' + (row.label || name)}
+                    icon={<Icon icon={Trash2} />}
+                    variant="ghost"
+                    onClick={() => remove(row.key)}
+                  />
+                  <MoreMenu
+                    label={'Autres actions : ' + (row.label || name)}
+                    alignment="end"
+                    presentation="adaptive"
+                    items={[
+                      ...(index > 0 ? [{ label: 'Monter', onClick: () => move(row.key, -1) }] : []),
+                      ...(index < list.length - 1 ? [{ label: 'Descendre', onClick: () => move(row.key, 1) }] : []),
+                      {
+                        label: kind === 'task' ? 'Passer en « À vérifier »' : 'Passer en « À faire »',
+                        onClick: () => change(row.key, { kind: kind === 'task' ? 'check' : 'task' }),
+                      },
+                    ]}
+                  />
+                </HStack>
+              )
+            })}
+            <HStack>
+              <Button
+                label={kind === 'task' ? 'Ajouter un point à faire' : 'Ajouter un point à vérifier'}
+                icon={<Icon icon={Plus} />}
+                variant="ghost"
+                size="sm"
+                onClick={() => insert(kind, list[list.length - 1]?.key)}
+              />
+            </HStack>
+          </VStack>
+        )
+      })}
+      <Text type="supporting">
+        Entrée ajoute la ligne suivante, Retour arrière efface une ligne vide, coller une liste crée un point par ligne.
+        Les lignes vides sont ignorées.
+      </Text>
     </VStack>
   )
 }
@@ -167,7 +297,7 @@ function Lines({ text }: { text: string }) {
   return (
     <VStack gap={1}>
       {text.split('\n').map((line, index) => (
-        <Text key={index}>{line || '\u00a0'}</Text>
+        <Text key={index}>{line || ' '}</Text>
       ))}
     </VStack>
   )
@@ -186,126 +316,186 @@ function PlanEditor({
   agentId?: string
   lotIds?: readonly string[]
   close: () => void
-  saved: (count: number) => void
+  saved: (created: number, skipped: readonly string[]) => void
 }) {
   const [lots, setLots] = useState<string[]>([...lotIds]),
-    [agent, setAgent] = useState(
-      options.agents.some((item) => item.id === agentId) ? agentId : (options.agents[0]?.id ?? ''),
-    ),
+    [agent, setAgent] = useState(() => defaultAgent(options.agents, agentId, rememberedAgent())),
     [date, setDate] = useState(day),
     [template, setTemplate] = useState(''),
     [priority, setPriority] = useState<Priority>('normal'),
     [note, setNote] = useState(''),
     [rows, setRows] = useState<Row[]>([])
   const mutation = useMutation()
+  const loadMovements = useCallback(() => call((client) => client.cleaning.movements({ query: { day: date } })), [date])
+  const movements = useQuery(date ? 'cleaning-movements:' + date : '', loadMovements)
+  const loadDay = useCallback(
+    () => call((client) => client.cleaning.tasks({ query: { from: date, to: date } })),
+    [date],
+  )
+  const planned = useQuery(date ? 'cleaning-day:' + date : '', loadDay)
+  const active = new Set(options.lots.map((lot) => lot.id))
+  const taken = new Set((planned.data ?? []).filter((task) => task.status !== 'cancelled').map((task) => task.lot_id))
+  const free = lots.filter((id) => !taken.has(id))
+  const blocked = lots.filter((id) => taken.has(id))
+  const lotOf = (id: string) => options.lots.find((lot) => lot.id === id)
   const fallback = options.templates.find((item) => item.is_default)
-  const applied = (lotId: string) => {
-    const extra = rows.length ? plural(rows.length, 'point ajouté', 'points ajoutés') : ''
-    const lot = options.lots.find((item) => item.id === lotId)
-    const chosen =
-      template === 'none'
-        ? undefined
-        : options.templates.find((item) => item.id === (template || lot?.template_id || fallback?.id || ''))
-    return chosen ? chosen.name + (extra ? ' + ' + extra : '') : extra || 'sans checklist'
-  }
+  const templateFor = (lotId: string) =>
+    template === 'none'
+      ? undefined
+      : options.templates.find((item) => item.id === (template || lotOf(lotId)?.template_id || fallback?.id || ''))
+  const groups = [...new Set(free.map((id) => templateFor(id)?.id ?? ''))].map((id) => ({
+    template: options.templates.find((item) => item.id === id),
+    lots: free.filter((lot) => (templateFor(lot)?.id ?? '') === id),
+  }))
+  const numbers = (ids: readonly string[]) => ids.map((id) => lotOf(id)?.number ?? '?').join(', ')
+  const add = (ids: readonly string[]) =>
+    setLots((current) => [...new Set([...current, ...ids.filter((id) => active.has(id))])])
+  const departures = (movements.data?.departures ?? []).filter((id) => active.has(id)),
+    arrivals = (movements.data?.arrivals ?? []).filter((id) => active.has(id)),
+    buildings = [...new Set(options.lots.map((lot) => lot.building_name).filter(Boolean))]
+  const extra = pointsOf(rows)
   return (
     <Editor
       title="Planifier un ménage"
-      label={lots.length > 1 ? 'Planifier ' + lots.length + ' lots' : 'Planifier'}
+      width={760}
+      label={free.length > 1 ? 'Planifier ' + free.length + ' lots' : 'Planifier'}
       close={close}
       busy={mutation.busy}
       error={mutation.error}
-      disabled={!lots.length || !agent || !date || rows.some((row) => !row.label.trim())}
+      disabled={!free.length || !agent || !date}
       submit={() =>
-        void mutation.run(
-          () =>
-            call((client) =>
-              client.cleaning.create({
-                payload: {
-                  lot_ids: lots,
-                  agent_id: agent,
-                  day: date,
-                  template_id: template,
-                  note,
-                  priority,
-                  items: rows.map(({ kind, label }) => ({ kind, label })),
-                },
-              }),
-            ),
-          () => saved(lots.length),
-        )
+        void mutation.run(async () => {
+          const result = await call((client) =>
+            client.cleaning.create({
+              payload: {
+                lot_ids: free,
+                agent_id: agent,
+                day: date,
+                template_id: template,
+                note,
+                priority,
+                items: extra,
+              },
+            }),
+          )
+          rememberAgent(agent)
+          saved(result.created, result.skipped)
+        })
       }
     >
-      <MultiSelector
-        label="Lots"
-        description="Une tâche est créée pour chaque lot choisi."
-        options={options.lots.map((lot) => ({ value: lot.id, label: lotLabel(lot) }))}
-        value={lots}
-        onChange={setLots}
-        hasSearch
-        searchPlaceholder="Rechercher un lot"
-        placeholder="Aucun lot choisi"
-        emptyText="Aucun lot actif."
-        emptySearchText="Aucun lot trouvé."
-        triggerDisplay="badges"
-      />
-      <Selector
-        label="Agent"
-        value={agent}
-        onChange={setAgent}
-        options={options.agents.map((item) => ({
-          value: item.id,
-          label: item.name,
-          description: roleLabels[item.role],
-        }))}
-      />
-      <DateField label="Jour" value={date} onChange={setDate} />
-      <PriorityField value={priority} onChange={setPriority} />
-      <Selector
-        label="Fiche de ménage"
-        value={template || 'lot'}
-        onChange={(value) => setTemplate(value === 'lot' ? '' : value)}
-        options={[
-          { value: 'lot', label: 'Fiche habituelle de chaque lot' },
-          ...options.templates.map((item) => ({ value: item.id, label: item.name })),
-          { value: 'none', label: 'Sans fiche : saisir la checklist ci-dessous' },
-        ]}
-      />
-      {!fallback && template === '' && lots.some((id) => !options.lots.find((item) => item.id === id)?.template_id) && (
-        <Banner
-          status="warning"
-          title="Aucune fiche par défaut"
-          description="Les lots sans fiche spécifique seront planifiés sans checklist. Choisissez une fiche ci-dessus ou définissez une fiche par défaut dans l’onglet Fiches."
+      <VStack gap={3}>
+        <Heading level={3}>Lots</Heading>
+        <HStack gap={2} wrap="wrap">
+          <Button
+            size="sm"
+            label={'Sorties du jour (' + departures.length + ')'}
+            isDisabled={!departures.length}
+            onClick={() => add(departures)}
+          />
+          <Button
+            size="sm"
+            label={'Entrées du jour (' + arrivals.length + ')'}
+            isDisabled={!arrivals.length}
+            onClick={() => add(arrivals)}
+          />
+          {buildings.length > 1 &&
+            buildings.map((building) => (
+              <Button
+                key={building}
+                size="sm"
+                label={building}
+                aria-label={'Ajouter les lots du bâtiment ' + building}
+                onClick={() => add(options.lots.filter((lot) => lot.building_name === building).map((lot) => lot.id))}
+              />
+            ))}
+          {lots.length > 0 && <Button size="sm" variant="ghost" label="Vider" onClick={() => setLots([])} />}
+        </HStack>
+        <MultiSelector
+          label="Lots"
+          isLabelHidden
+          options={options.lots.map((lot) => ({ value: lot.id, label: lotLabel(lot) }))}
+          value={lots}
+          onChange={setLots}
+          hasSearch
+          searchPlaceholder="Rechercher un lot"
+          placeholder="Aucun lot choisi"
+          emptyText="Aucun lot actif."
+          emptySearchText="Aucun lot trouvé."
+          triggerDisplay="badges"
         />
-      )}
-      {lots.length > 0 && (
-        <Text color="secondary">
-          {lots
-            .map((id) => {
-              const lot = options.lots.find((item) => item.id === id)
-              return (lot ? 'Lot ' + lot.number : 'Lot') + ' : ' + applied(id)
-            })
-            .join(' · ')}
-        </Text>
-      )}
-      <PointRows
-        title={template === 'none' ? 'Checklist de la tâche' : 'Points supplémentaires'}
-        description={
-          template === 'none'
-            ? 'Ce que l’agent doit faire ou vérifier dans ce lot ; chaque point se coche à la réalisation.'
-            : 'Ajoutés à la fiche pour ce ménage uniquement ; la fiche n’est pas modifiée.'
-        }
-        empty={template === 'none' ? 'Aucun point : la tâche sera planifiée sans checklist.' : 'Aucun point ajouté.'}
-        rows={rows}
-        setRows={setRows}
-      />
+        {blocked.length > 0 && (
+          <Banner
+            status="warning"
+            title={plural(blocked.length, 'lot déjà planifié', 'lots déjà planifiés') + ' ce jour'}
+            description={'Lots ' + numbers(blocked) + ' : ils seront ignorés.'}
+          />
+        )}
+      </VStack>
+      <VStack gap={3}>
+        <Heading level={3}>Qui et quand</Heading>
+        <AgentField agents={options.agents} value={agent} onChange={setAgent} />
+        <HStack gap={3} wrap="wrap">
+          <DateField label="Jour" value={date} onChange={setDate} />
+          <PriorityField value={priority} onChange={setPriority} />
+        </HStack>
+      </VStack>
+      <VStack gap={3}>
+        <Heading level={3}>Checklist</Heading>
+        <Selector
+          label="Fiche de ménage"
+          value={template || 'lot'}
+          onChange={(value) => setTemplate(value === 'lot' ? '' : value)}
+          presentation="adaptive"
+          options={[
+            { value: 'lot', label: 'Fiche habituelle de chaque lot' },
+            ...options.templates.map((item) => ({ value: item.id, label: item.name })),
+            { value: 'none', label: 'Aucune fiche : uniquement les points saisis ici' },
+          ]}
+        />
+        {template !== 'none' &&
+          groups.map((group) => (
+            <List
+              key={group.template?.id ?? 'none'}
+              hasDividers
+              header={
+                <VStack gap={0}>
+                  <Text weight="semibold">{group.template ? group.template.name : 'Sans fiche'}</Text>
+                  <Text type="supporting">{'Lots ' + numbers(group.lots)}</Text>
+                </VStack>
+              }
+            >
+              {group.template?.items.length ? (
+                group.template.items.map((item, index) => (
+                  <ListItem key={index} label={item.label} description={kindTitles[item.kind]} />
+                ))
+              ) : (
+                <ListItem
+                  label={
+                    group.template
+                      ? 'Cette fiche est vide.'
+                      : 'Aucune fiche par défaut : seuls les points ajoutés ci-dessous seront à cocher.'
+                  }
+                />
+              )}
+            </List>
+          ))}
+        <ChecklistEditor
+          rows={rows}
+          setRows={setRows}
+          description={
+            template === 'none'
+              ? 'Ce que l’agent coche dans chaque lot.'
+              : 'Points en plus de la fiche, pour ce ménage uniquement : la fiche n’est pas modifiée.'
+          }
+        />
+      </VStack>
       <TextArea
-        label="Consigne pour l’agent"
-        description="Information libre affichée en tête de la tâche, sans case à cocher."
+        label="Consigne (information, sans case à cocher)"
+        description="Affichée en tête de la tâche."
         value={note}
         onChange={setNote}
         isOptional
-        rows={4}
+        rows={3}
         placeholder="Clés à l’accueil, départ à 10 h…"
       />
     </Editor>
@@ -337,49 +527,83 @@ export function CommentIcon({ comments }: { comments: readonly string[] }) {
   ) : null
 }
 
-function RescheduleEditor({
-  date,
+type BulkMode = 'agent' | 'day' | 'priority' | 'items'
+const bulkTitles: Record<BulkMode, string> = {
+  agent: 'Réaffecter',
+  day: 'Changer le jour',
+  priority: 'Changer la priorité',
+  items: 'Ajouter des points',
+}
+
+function BulkEditor({
+  mode,
   tasks,
+  options,
   close,
   saved,
 }: {
-  date: string
+  mode: BulkMode
   tasks: readonly CleaningTask[]
+  options: CleaningOptions
   close: () => void
-  saved: (count: number, day: string) => void
+  saved: (updated: number, skipped: number) => void
 }) {
-  const [ids, setIds] = useState(tasks.map((task) => task.id)),
-    [day, setDay] = useState(addDays(date, 1))
+  const [agent, setAgent] = useState(() => defaultAgent(options.agents, rememberedAgent())),
+    [day, setDay] = useState(tasks[0]?.day ?? today()),
+    [priority, setPriority] = useState<Priority>('normal'),
+    [rows, setRows] = useState<Row[]>(() => [newRow('task')])
   const mutation = useMutation()
+  const items = pointsOf(rows)
+  const change =
+    mode === 'agent'
+      ? { agent_id: agent }
+      : mode === 'day'
+        ? { day }
+        : mode === 'priority'
+          ? { priority }
+          : { items: items.map(({ kind, label }) => ({ kind, label })) }
   return (
     <Editor
-      title={'Reporter des ménages du ' + dayLabel(date)}
-      label={ids.length > 1 ? 'Reporter ' + ids.length + ' lots' : 'Reporter'}
+      title={bulkTitles[mode] + ' · ' + plural(tasks.length, 'tâche', 'tâches')}
+      label={bulkTitles[mode]}
+      width={mode === 'items' ? 640 : 560}
       close={close}
       busy={mutation.busy}
       error={mutation.error}
-      disabled={!ids.length || !day || day === date}
+      disabled={(mode === 'agent' && !agent) || (mode === 'day' && !day) || (mode === 'items' && !items.length)}
       submit={() =>
-        void mutation.run(
-          () => call((client) => client.cleaning.reschedule({ payload: { task_ids: ids, day } })),
-          () => saved(ids.length, day),
-        )
+        void mutation.run(async () => {
+          const result = await call((client) =>
+            client.cleaning.bulk({ payload: { task_ids: tasks.map((task) => task.id), ...change } }),
+          )
+          if (mode === 'agent') rememberAgent(agent)
+          saved(result.updated, result.skipped)
+        })
       }
     >
-      <CheckboxList label="Lots à reporter" value={ids} onChange={setIds} hasDividers density="compact">
-        {tasks.map((task) => (
-          <CheckboxListItem
-            key={task.id}
-            value={task.id}
-            label={lotLabel({ number: task.lot_number, building_name: task.building_name })}
-            description={task.agent_name + ' · ' + (task.template_name || 'Sans fiche')}
-          />
-        ))}
-      </CheckboxList>
-      <DateField label="Nouveau jour" value={day} onChange={setDay} />
       <Text color="secondary">
-        Seuls les ménages prévus se reportent ; l’agent, la consigne et la checklist sont conservés.
+        {tasks
+          .slice(0, 12)
+          .map((task) => 'Lot ' + task.lot_number + ' (' + dateLabel(task.day) + ')')
+          .join(', ') + (tasks.length > 12 ? '…' : '')}
       </Text>
+      {mode === 'agent' && <AgentField agents={options.agents} value={agent} onChange={setAgent} />}
+      {mode === 'day' && (
+        <>
+          <DateField label="Nouveau jour" value={day} onChange={setDay} />
+          <Text color="secondary">
+            L’agent, la consigne et la checklist sont conservés ; l’ordre de passage est remis à zéro.
+          </Text>
+        </>
+      )}
+      {mode === 'priority' && <PriorityField value={priority} onChange={setPriority} />}
+      {mode === 'items' && (
+        <ChecklistEditor
+          rows={rows}
+          setRows={setRows}
+          description="Ajoutés à la fin de la checklist de chaque tâche choisie ; les fiches ne sont pas modifiées."
+        />
+      )}
     </Editor>
   )
 }
@@ -419,117 +643,171 @@ function OrderEditor({
       }
     >
       <Text color="secondary">
-        Les ménages prévus s’affichent dans cet ordre pour les agents. Un ménage reporté perd sa place.
+        Les ménages prévus s’affichent dans cet ordre pour les agents. Un ménage déplacé à un autre jour perd sa place.
       </Text>
       <List hasDividers>
-        {list.map((task, index) => {
-          const label = lotLabel({ number: task.lot_number, building_name: task.building_name })
-          return (
-            <ListItem
-              key={task.id}
-              label={index + 1 + '. ' + label}
-              description={task.agent_name + ' · ' + (task.template_name || 'Sans fiche')}
-              endContent={
-                <HStack gap={1} vAlign="center">
-                  <PriorityToken priority={task.priority} />
-                  <IconButton
-                    label={'Avancer ' + label}
-                    icon={<Icon icon={ArrowUp} />}
-                    variant="ghost"
-                    isDisabled={index === 0}
-                    onClick={() => move(index, -1)}
-                  />
-                  <IconButton
-                    label={'Reculer ' + label}
-                    icon={<Icon icon={ArrowDown} />}
-                    variant="ghost"
-                    isDisabled={index === list.length - 1}
-                    onClick={() => move(index, 1)}
-                  />
-                </HStack>
-              }
-            />
-          )
-        })}
+        {list.map((task, index) => (
+          <ListItem
+            key={task.id}
+            label={index + 1 + '. ' + taskLot(task)}
+            description={task.agent_name + ' · ' + (task.template_name || 'Sans fiche')}
+            endContent={
+              <HStack gap={1} vAlign="center">
+                <PriorityToken priority={task.priority} />
+                <MoreMenu
+                  label={'Déplacer ' + taskLot(task)}
+                  alignment="end"
+                  presentation="adaptive"
+                  items={[
+                    ...(index > 0 ? [{ label: 'Avancer', onClick: () => move(index, -1) }] : []),
+                    ...(index < list.length - 1 ? [{ label: 'Reculer', onClick: () => move(index, 1) }] : []),
+                  ]}
+                />
+              </HStack>
+            }
+          />
+        ))}
       </List>
     </Editor>
   )
 }
 
-function TaskList({
+function Progress({ task }: { task: CleaningTask }) {
+  return (
+    <HStack gap={2} vAlign="center" wrap="wrap">
+      <Text>{task.total ? task.handled + '/' + task.total : '—'}</Text>
+      {task.issues > 0 && <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />}
+      <CommentIcon comments={taskComments(task)} />
+    </HStack>
+  )
+}
+
+function DayTable({
   date,
   tasks,
-  reschedule,
+  selected,
+  select,
   order,
 }: {
   date: string
   tasks: readonly CleaningTask[]
-  reschedule?: (date: string, tasks: readonly CleaningTask[]) => void
-  order?: (date: string, tasks: readonly CleaningTask[]) => void
+  selected: ReadonlySet<string>
+  select: (ids: readonly string[], isSelected: boolean) => void
+  order: (date: string, tasks: readonly CleaningTask[]) => void
 }) {
   const movable = tasks.filter((task) => task.status === 'planned')
+  const all = movable.length > 0 && movable.every((task) => selected.has(task.id))
+  const selection = useTableSelection<CleaningTask>({
+    getIsItemSelected: (task) => selected.has(task.id),
+    onSelectItem: ({ item, isSelected }) => select([item.id], isSelected),
+    onSelectAll: ({ isAllSelected }) =>
+      select(
+        movable.map((task) => task.id),
+        isAllSelected,
+      ),
+    getIsAllSelected: () => all,
+    getIsIndeterminate: () => !all && movable.some((task) => selected.has(task.id)),
+    getIsItemSelectable: (task) => task.status === 'planned',
+    getRowLabel: taskLot,
+  })
+  const mobile = useMobile()
   const rank = (task: CleaningTask) =>
     task.status === 'planned' && task.position !== null ? movable.indexOf(task) + 1 + '. ' : ''
   return (
-    <List
-      hasDividers
-      header={
-        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
-          <HStack gap={2} vAlign="center">
-            <Heading level={2}>{dayLabel(date)}</Heading>
-            {date === today() && <Token label="Aujourd’hui" color="blue" size="sm" />}
-          </HStack>
-          <HStack gap={2} wrap="wrap">
-            {order && movable.length > 1 && (
-              <Button
-                label="Ordonner"
-                aria-label={'Ordonner les ménages du ' + dayLabel(date)}
-                size="sm"
-                onClick={() => order(date, movable)}
-              />
-            )}
-            {reschedule && movable.length > 0 && (
-              <Button
-                label="Reporter"
-                aria-label={'Reporter des ménages du ' + dayLabel(date)}
-                size="sm"
-                onClick={() => reschedule(date, movable)}
-              />
-            )}
-          </HStack>
+    <VStack gap={2}>
+      <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
+        <HStack gap={2} vAlign="center">
+          <Heading level={2}>{dayLabel(date)}</Heading>
+          {date === today() && <Token label="Aujourd’hui" color="blue" size="sm" />}
         </HStack>
-      }
-    >
-      {tasks.length ? (
-        tasks.map((task) => (
-          <ListItem
-            key={task.id}
-            label={rank(task) + lotLabel({ number: task.lot_number, building_name: task.building_name })}
-            href={'#cleaning/' + task.id}
-            description={[
-              task.agent_name,
-              task.template_name || 'Sans fiche',
-              task.total ? task.handled + '/' + task.total + ' points traités' : '',
-              task.note,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-            endContent={
-              <HStack gap={2} vAlign="center" wrap="wrap">
-                <PriorityToken priority={task.priority} />
-                {task.issues > 0 && (
-                  <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
-                )}
-                <CommentIcon comments={taskComments(task)} />
-                <StateToken state={task.status} />
-              </HStack>
-            }
+        {movable.length > 1 && (
+          <Button
+            label="Ordre de passage"
+            aria-label={'Ordre de passage du ' + dayLabel(date)}
+            size="sm"
+            onClick={() => order(date, movable)}
           />
-        ))
+        )}
+      </HStack>
+      {mobile ? (
+        <List hasDividers>
+          {tasks.map((task) => (
+            <ListItem
+              key={task.id}
+              href={'#cleaning/' + task.id}
+              label={rank(task) + taskLot(task)}
+              description={[
+                task.agent_name,
+                task.total ? task.handled + '/' + task.total + ' points' : 'Sans checklist',
+                task.issues ? plural(task.issues, 'anomalie', 'anomalies') : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              startContent={
+                task.status === 'planned' ? (
+                  <CheckboxInput
+                    label={'Sélectionner ' + taskLot(task)}
+                    isLabelHidden
+                    value={selected.has(task.id)}
+                    onChange={(checked) => select([task.id], checked)}
+                  />
+                ) : undefined
+              }
+              endContent={
+                <VStack gap={1} hAlign="end">
+                  <StateToken state={task.status} />
+                  {task.priority !== 'normal' && <PriorityToken priority={task.priority} />}
+                </VStack>
+              }
+            />
+          ))}
+        </List>
       ) : (
-        <ListItem label="Aucun ménage prévu." />
+        <Table
+          data={[...tasks]}
+          idKey="id"
+          dividers="rows"
+          plugins={{ selection }}
+          columns={[
+            {
+              key: 'lot_number',
+              header: 'Lot',
+              width: proportional(2, { minWidth: 140 }),
+              renderCell: (task) => (
+                <VStack gap={0}>
+                  <Link href={'#cleaning/' + task.id}>{rank(task) + taskLot(task)}</Link>
+                  <Text type="supporting">{task.template_name || 'Sans fiche'}</Text>
+                </VStack>
+              ),
+            },
+            {
+              key: 'agent_name',
+              header: 'Agent',
+              width: proportional(1, { minWidth: 100 }),
+              renderCell: (task) => <Text>{task.agent_name}</Text>,
+            },
+            {
+              key: 'handled',
+              header: 'Points traités',
+              width: proportional(1, { minWidth: 110 }),
+              renderCell: (task) => <Progress task={task} />,
+            },
+            {
+              key: 'priority',
+              header: 'Priorité',
+              width: proportional(1, { minWidth: 90 }),
+              renderCell: (task) => <PriorityToken priority={task.priority} />,
+            },
+            {
+              key: 'status',
+              header: 'Statut',
+              width: proportional(1, { minWidth: 90 }),
+              renderCell: (task) => <StateToken state={task.status} />,
+            },
+          ]}
+        />
       )}
-    </List>
+    </VStack>
   )
 }
 
@@ -601,15 +879,7 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
               key: 'handled',
               header: 'Points traités',
               width: proportional(1),
-              renderCell: (task) => (
-                <HStack gap={2} vAlign="center">
-                  <Text>{task.total ? task.handled + '/' + task.total : '—'}</Text>
-                  {task.issues > 0 && (
-                    <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
-                  )}
-                  <CommentIcon comments={taskComments(task)} />
-                </HStack>
-              ),
+              renderCell: (task) => <Progress task={task} />,
             },
             {
               key: 'priority',
@@ -634,9 +904,9 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
           day={today()}
           lotIds={[lotId]}
           close={() => setPlanning(false)}
-          saved={(count) => {
+          saved={(created) => {
             setPlanning(false)
-            setSuccess(count > 1 ? count + ' tâches planifiées.' : 'Tâche planifiée.')
+            setSuccess(created > 1 ? created + ' tâches planifiées.' : 'Tâche planifiée.')
             setPage(1)
             void result.refresh()
           }}
@@ -646,14 +916,129 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
   )
 }
 
+const plannedMessage = (created: number, skipped: readonly string[]) =>
+  plural(created, 'tâche planifiée', 'tâches planifiées') +
+  (skipped.length ? ' ; déjà planifiés ce jour, ignorés : lots ' + skipped.join(', ') : '') +
+  '.'
+const bulkMessage = (updated: number, skipped: number) =>
+  plural(updated, 'tâche modifiée', 'tâches modifiées') +
+  (skipped
+    ? ' ; ' + plural(skipped, 'tâche terminée ou annulée ignorée', 'tâches terminées ou annulées ignorées')
+    : '') +
+  '.'
+
+function MyDay({ me }: { me: Me }) {
+  const [date, setDate] = useHashParam('date', today())
+  const load = useCallback(() => call((client) => client.cleaning.tasks({ query: { from: date, to: date } })), [date])
+  const result = useQuery(`cleaning:${date}:${date}:${me.id}:all`, load)
+  const tasks = result.data ?? []
+  const todo = tasks.filter((task) => task.status === 'planned'),
+    done = tasks.filter((task) => task.status === 'done')
+  return (
+    <PageLayout
+      header={
+        <VStack gap={1}>
+          <Heading level={1}>Ma journée</Heading>
+          <Text color="secondary">Vos lots dans l’ordre de passage. Ouvrez un lot pour cocher sa checklist.</Text>
+        </VStack>
+      }
+    >
+      <HStack gap={3} wrap="wrap" vAlign="center">
+        <PeriodNav
+          label="Navigation par jour"
+          previous="Précédent"
+          current="Aujourd’hui"
+          next="Suivant"
+          onPrevious={() => setDate(addDays(date, -1))}
+          onCurrent={() => setDate(today())}
+          onNext={() => setDate(addDays(date, 1))}
+        />
+        <Text weight="semibold">{dayLabel(date)}</Text>
+      </HStack>
+      {!result.data ? (
+        <Loading error={result.error} retry={() => void result.refresh()} />
+      ) : !todo.length && !done.length ? (
+        <Text>Aucun ménage prévu ce jour.</Text>
+      ) : (
+        <>
+          <ProgressBar
+            label="Lots terminés"
+            value={done.length}
+            max={todo.length + done.length}
+            hasValueLabel
+            formatValueLabel={(value, max) => value + '/' + max}
+            variant={todo.length ? 'accent' : 'success'}
+          />
+          {todo.length ? (
+            <VStack gap={3}>
+              {todo.map((task, index) => (
+                <ClickableCard
+                  key={task.id}
+                  label={'Ouvrir ' + taskLot(task)}
+                  href={'#cleaning/' + task.id}
+                  variant={index === 0 ? 'blue' : 'default'}
+                  elevation="low"
+                >
+                  <VStack gap={2}>
+                    <HStack gap={2} vAlign="center" wrap="wrap">
+                      <Heading level={2}>{index + 1 + '. ' + taskLot(task)}</Heading>
+                      {index === 0 && <Token label="Prochain lot" color="blue" size="sm" />}
+                      {task.priority !== 'normal' && <PriorityToken priority={task.priority} />}
+                    </HStack>
+                    {task.total > 0 && (
+                      <ProgressBar
+                        label="Points traités"
+                        value={task.handled}
+                        max={task.total}
+                        hasValueLabel
+                        formatValueLabel={(value, max) => value + '/' + max}
+                      />
+                    )}
+                    {task.note && <Text>{'Consigne : ' + task.note.split('\n')[0]}</Text>}
+                  </VStack>
+                </ClickableCard>
+              ))}
+            </VStack>
+          ) : (
+            <Banner status="success" title="Journée terminée" description="Tous vos lots du jour sont faits." />
+          )}
+          {done.length > 0 && (
+            <List hasDividers header={<Heading level={2}>Terminés</Heading>}>
+              {done.map((task) => (
+                <ListItem
+                  key={task.id}
+                  label={taskLot(task)}
+                  href={'#cleaning/' + task.id}
+                  description={task.completed_at ? 'Terminé ' + timeLabel(task.completed_at) : undefined}
+                  endContent={
+                    task.issues > 0 ? (
+                      <Token label={plural(task.issues, 'anomalie', 'anomalies')} color="orange" size="sm" />
+                    ) : undefined
+                  }
+                />
+              ))}
+            </List>
+          )}
+        </>
+      )}
+    </PageLayout>
+  )
+}
+
 export function Cleaning({ me }: { me: Me }) {
-  const manager = me.role !== 'cleaner'
+  return me.role === 'cleaner' ? <MyDay me={me} /> : <Planning />
+}
+
+function Planning() {
+  const mobile = useMobile()
   const [date, setDate] = useHashParam('date', today()),
     [agent, setAgent] = useHashParam('agent', ''),
     [priority, setPriority] = useState<PriorityFilterValue>('all'),
-    [view, setView] = useHashParam('vue', manager ? 'week' : 'day'),
+    [view, setView] = useHashParam('vue', mobile ? 'day' : 'week'),
     [planning, setPlanning] = useState(false),
-    [moving, setMoving] = useState<{ date: string; tasks: readonly CleaningTask[] } | null>(null),
+    [selected, setSelected] = useState<ReadonlySet<string>>(new Set()),
+    [bulk, setBulk] = useState<BulkMode | null>(null),
+    [cancelling, setCancelling] = useState(false),
     [ordering, setOrdering] = useState<{ date: string; tasks: readonly CleaningTask[] } | null>(null),
     [success, setSuccess] = useState('')
   const week = view === 'week',
@@ -670,17 +1055,32 @@ export function Cleaning({ me }: { me: Me }) {
     [from, to, agent, priority],
   )
   const result = useQuery(`cleaning:${from}:${to}:${agent}:${priority}`, load)
-  const options = useQuery<CleaningOptions | null>(manager ? 'cleaning-options' : '', manager ? loadOptions : noOptions)
+  const options = useQuery<CleaningOptions | null>('cleaning-options', loadOptions)
+  const mutation = useMutation()
   const tasks = result.data ?? []
   const active = tasks.filter((task) => task.status !== 'cancelled')
   const done = active.filter((task) => task.status === 'done').length
   const issues = active.reduce((sum, task) => sum + task.issues, 0)
-  const reschedule = manager
-    ? (day: string, list: readonly CleaningTask[]) => setMoving({ date: day, tasks: list })
-    : undefined
-  const order = manager
-    ? (day: string, list: readonly CleaningTask[]) => setOrdering({ date: day, tasks: list })
-    : undefined
+  const movable = tasks.filter((task) => task.status === 'planned')
+  const chosen = movable.filter((task) => selected.has(task.id))
+  const select = (ids: readonly string[], isSelected: boolean) =>
+    setSelected((current) => {
+      const next = new Set(current)
+      for (const id of ids) {
+        if (isSelected) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  const clear = () => setSelected(new Set())
+  const changed = (message: string) => {
+    setBulk(null)
+    setCancelling(false)
+    clear()
+    setSuccess(message)
+    void result.refresh()
+  }
+  const days = [...new Set(tasks.map((task) => task.day))]
   return (
     <PageLayout
       header={
@@ -688,22 +1088,64 @@ export function Cleaning({ me }: { me: Me }) {
           <VStack gap={1}>
             <Heading level={1}>Ménage</Heading>
             <Text color="secondary">
-              {manager
-                ? 'Planning des agents, checklist de chaque lot et suivi de la réalisation.'
-                : 'Vos lots à nettoyer et leur checklist.'}
+              Cochez des tâches pour les modifier ensemble ; ouvrez une tâche pour sa checklist.
             </Text>
           </VStack>
-          {manager && (
-            <Button
-              label="Planifier un ménage"
-              variant="primary"
-              isDisabled={!options.data}
-              onClick={() => setPlanning(true)}
-            />
-          )}
+          <Button
+            label="Planifier un ménage"
+            variant="primary"
+            isDisabled={!options.data}
+            onClick={() => setPlanning(true)}
+          />
         </HStack>
       }
-      navigation={manager ? <CleaningTabs current="planning" /> : undefined}
+      navigation={<CleaningTabs current="planning" />}
+      footer={
+        chosen.length > 0 && options.data && mobile ? (
+          <HStack gap={2} vAlign="center" hAlign="between">
+            <Text weight="semibold">{plural(chosen.length, 'sélectionnée', 'sélectionnées')}</Text>
+            <HStack gap={2}>
+              <Button label="Désélectionner" variant="ghost" onClick={clear} />
+              <DropdownMenu
+                button={{ label: 'Modifier', variant: 'primary' }}
+                presentation="adaptive"
+                alignment="end"
+                placement="above"
+                items={[
+                  { label: 'Réaffecter', onClick: () => setBulk('agent') },
+                  { label: 'Changer le jour', onClick: () => setBulk('day') },
+                  { label: 'Priorité', onClick: () => setBulk('priority') },
+                  { label: 'Ajouter des points', onClick: () => setBulk('items') },
+                  { type: 'divider' },
+                  { label: 'Annuler les tâches', variant: 'destructive', onClick: () => setCancelling(true) },
+                ]}
+              />
+            </HStack>
+          </HStack>
+        ) : chosen.length > 0 && options.data ? (
+          <TableSelectionToolbar
+            selection={{
+              selectedKeys: new Set(chosen.map((task) => task.id)),
+              selectedCount: chosen.length,
+              hasSelection: true,
+              clearSelection: clear,
+            }}
+            label="Actions groupées"
+            renderSelectionLabel={(count) => plural(count, 'tâche sélectionnée', 'tâches sélectionnées')}
+            clearLabel="Désélectionner"
+            size="md"
+            startContent={
+              <HStack gap={2} wrap="wrap">
+                <Button label="Réaffecter" onClick={() => setBulk('agent')} />
+                <Button label="Changer le jour" onClick={() => setBulk('day')} />
+                <Button label="Priorité" onClick={() => setBulk('priority')} />
+                <Button label="Ajouter des points" onClick={() => setBulk('items')} />
+                <Button label="Annuler" variant="destructive" onClick={() => setCancelling(true)} />
+              </HStack>
+            }
+          />
+        ) : undefined
+      }
     >
       <HStack gap={3} wrap="wrap" vAlign="center" hAlign="between">
         <HStack gap={3} wrap="wrap" vAlign="center">
@@ -729,15 +1171,17 @@ export function Cleaning({ me }: { me: Me }) {
           </VStack>
         </HStack>
         <HStack gap={2} wrap="wrap" vAlign="end">
-          <DateField
-            label="Aller à la date"
-            labelHidden
-            value={date}
-            onChange={(value) => {
-              if (value) setDate(value)
-            }}
-          />
-          {manager && options.data && (
+          {!mobile && (
+            <DateField
+              label="Aller à la date"
+              labelHidden
+              value={date}
+              onChange={(value) => {
+                if (value) setDate(value)
+              }}
+            />
+          )}
+          {options.data && (
             <Selector
               label="Agent"
               isLabelHidden
@@ -756,23 +1200,42 @@ export function Cleaning({ me }: { me: Me }) {
           </SegmentedControl>
         </HStack>
       </HStack>
-      <Feedback success={success} />
+      {movable.length > 1 && (
+        <HStack gap={2} wrap="wrap">
+          <Button
+            size="sm"
+            label={
+              chosen.length === movable.length
+                ? 'Tout désélectionner'
+                : 'Sélectionner les ' + movable.length + ' tâches prévues'
+            }
+            onClick={() =>
+              chosen.length === movable.length
+                ? clear()
+                : select(
+                    movable.map((task) => task.id),
+                    true,
+                  )
+            }
+          />
+        </HStack>
+      )}
+      <Feedback success={success} error={options.error} />
       {!result.data ? (
         <Loading error={result.error} retry={() => void result.refresh()} />
-      ) : !week ? (
-        <TaskList date={date} tasks={tasks} reschedule={reschedule} order={order} />
-      ) : tasks.length ? (
-        [...new Set(tasks.map((task) => task.day))].map((day) => (
-          <TaskList
+      ) : days.length ? (
+        days.map((day) => (
+          <DayTable
             key={day}
             date={day}
             tasks={tasks.filter((task) => task.day === day)}
-            reschedule={reschedule}
-            order={order}
+            selected={selected}
+            select={select}
+            order={(target, list) => setOrdering({ date: target, tasks: list })}
           />
         ))
       ) : (
-        <Text>Aucun ménage prévu cette semaine.</Text>
+        <Text>{week ? 'Aucun ménage prévu cette semaine.' : 'Aucun ménage prévu ce jour.'}</Text>
       )}
       {ordering && (
         <OrderEditor
@@ -786,16 +1249,41 @@ export function Cleaning({ me }: { me: Me }) {
           }}
         />
       )}
-      {moving && (
-        <RescheduleEditor
-          date={moving.date}
-          tasks={moving.tasks}
-          close={() => setMoving(null)}
-          saved={(count, day) => {
-            setMoving(null)
-            setSuccess((count > 1 ? count + ' ménages reportés' : 'Ménage reporté') + ' au ' + dayLabel(day) + '.')
-            void result.refresh()
+      {bulk && options.data && (
+        <BulkEditor
+          mode={bulk}
+          tasks={chosen}
+          options={options.data}
+          close={() => setBulk(null)}
+          saved={(updated, skipped) => changed(bulkMessage(updated, skipped))}
+        />
+      )}
+      {cancelling && (
+        <AlertDialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open && !mutation.busy) setCancelling(false)
           }}
+          title={'Annuler ' + plural(chosen.length, 'ménage', 'ménages') + ' ?'}
+          description={
+            mutation.error ||
+            'Les tâches restent visibles comme annulées dans le planning et peuvent être rétablies une par une.'
+          }
+          actionLabel="Annuler les tâches"
+          cancelLabel="Garder"
+          isActionLoading={mutation.busy}
+          onAction={() =>
+            void mutation.run(async () => {
+              const outcome = await call((client) =>
+                client.cleaning.bulk({ payload: { task_ids: chosen.map((task) => task.id), cancel: true } }),
+              )
+              changed(
+                plural(outcome.updated, 'tâche annulée', 'tâches annulées') +
+                  (outcome.skipped ? ' ; ' + plural(outcome.skipped, 'tâche ignorée', 'tâches ignorées') : '') +
+                  '.',
+              )
+            })
+          }
         />
       )}
       {planning && options.data && (
@@ -804,9 +1292,9 @@ export function Cleaning({ me }: { me: Me }) {
           day={date}
           agentId={agent}
           close={() => setPlanning(false)}
-          saved={(count) => {
+          saved={(created, skipped) => {
             setPlanning(false)
-            setSuccess(count > 1 ? count + ' tâches planifiées.' : 'Tâche planifiée.')
+            setSuccess(plannedMessage(created, skipped))
             void result.refresh()
           }}
         />
@@ -814,6 +1302,7 @@ export function Cleaning({ me }: { me: Me }) {
     </PageLayout>
   )
 }
+
 function TaskEditor({
   task,
   options,
@@ -847,16 +1336,7 @@ function TaskEditor({
         )
       }
     >
-      <Selector
-        label="Agent"
-        value={agent}
-        onChange={setAgent}
-        options={options.agents.map((item) => ({
-          value: item.id,
-          label: item.name,
-          description: roleLabels[item.role],
-        }))}
-      />
+      <AgentField agents={options.agents} value={agent} onChange={setAgent} />
       <DateField label="Jour" value={day} onChange={setDay} />
       <PriorityField value={priority} onChange={setPriority} />
       <TextArea label="Consigne pour l’agent" value={note} onChange={setNote} isOptional />
@@ -864,42 +1344,81 @@ function TaskEditor({
   )
 }
 
-function PointEditor({ taskId, close, saved }: { taskId: string; close: () => void; saved: () => void }) {
-  const [kind, setKind] = useState<CleaningItemKind>('task'),
-    [label, setLabel] = useState('')
+function TaskChecklistEditor({
+  taskId,
+  items,
+  close,
+  saved,
+}: {
+  taskId: string
+  items: readonly CleaningItem[]
+  close: () => void
+  saved: () => void
+}) {
+  const [rows, setRows] = useState<Row[]>(() => rowsOf(items))
   const mutation = useMutation()
   return (
     <Editor
-      title="Ajouter à la checklist de cette tâche"
+      title="Modifier la checklist"
+      width={640}
       close={close}
       busy={mutation.busy}
       error={mutation.error}
-      disabled={!label.trim()}
       submit={() =>
         void mutation.run(
-          () => call((client) => client.cleaning.addItem({ params: { id: taskId }, payload: { kind, label } })),
+          () =>
+            call((client) => client.cleaning.checklist({ params: { id: taskId }, payload: { items: pointsOf(rows) } })),
           saved,
         )
       }
     >
-      <Selector
-        label="Type"
-        value={kind}
-        onChange={(value) => setKind(value as CleaningItemKind)}
-        options={[
-          { value: 'task', label: 'À faire' },
-          { value: 'check', label: 'À vérifier' },
-        ]}
+      <ChecklistEditor
+        rows={rows}
+        setRows={setRows}
+        description="Pour cette tâche uniquement. Les points déjà cochés gardent leur état, sauf s’ils changent de section."
       />
-      <TextInput
-        label="Intitulé"
-        value={label}
-        onChange={setLabel}
-        isRequired
-        hasAutoFocus
-        placeholder={kind === 'task' ? 'Aspirer les sols' : 'Ampoules fonctionnelles'}
-      />
-      <Text color="secondary">Ajouté à cette tâche uniquement ; la fiche n’est pas modifiée.</Text>
+    </Editor>
+  )
+}
+
+function SaveAsTemplate({
+  items,
+  close,
+  saved,
+}: {
+  items: readonly CleaningItem[]
+  close: () => void
+  saved: (id: string) => void
+}) {
+  const [name, setName] = useState('')
+  const mutation = useMutation()
+  return (
+    <Editor
+      title="Enregistrer comme fiche"
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error}
+      disabled={!name.trim()}
+      submit={() =>
+        void mutation.run(async () => {
+          const result = await call((client) =>
+            client.cleaning.createTemplate({
+              payload: {
+                name,
+                is_default: false,
+                items: kinds.flatMap((kind) =>
+                  items.filter((item) => item.kind === kind).map(({ label }) => ({ kind, label })),
+                ),
+                lot_ids: [],
+              },
+            }),
+          )
+          saved(result.id)
+        })
+      }
+    >
+      <TextInput label="Nom de la fiche" value={name} onChange={setName} isRequired hasAutoFocus />
+      <Text color="secondary">{pointsSummary(items) + ', repris de cette tâche. Aucun lot n’y est rattaché.'}</Text>
     </Editor>
   )
 }
@@ -907,7 +1426,7 @@ function PointEditor({ taskId, close, saved }: { taskId: string; close: () => vo
 function IssueEditor({ item, close, saved }: { item: CleaningItem; close: () => void; saved: () => void }) {
   const [note, setNote] = useState(item.state === 'issue' ? item.note : '')
   const mutation = useMutation()
-  const title = item.kind === 'task' ? 'Tâche non faite' : 'Signaler une anomalie'
+  const title = item.kind === 'task' ? 'Non fait' : 'Anomalie'
   return (
     <Editor
       title={title + ' · ' + item.label}
@@ -923,7 +1442,7 @@ function IssueEditor({ item, close, saved }: { item: CleaningItem; close: () => 
       }
     >
       <TextArea
-        label={item.kind === 'task' ? 'Raison' : 'Constat'}
+        label={item.kind === 'task' ? 'Pourquoi ?' : 'Qu’avez-vous constaté ?'}
         value={note}
         onChange={setNote}
         isOptional
@@ -934,7 +1453,19 @@ function IssueEditor({ item, close, saved }: { item: CleaningItem; close: () => 
   )
 }
 
-function FinishEditor({ task, close, saved }: { task: CleaningTask; close: () => void; saved: () => void }) {
+function FinishEditor({
+  task,
+  handled,
+  issues,
+  close,
+  saved,
+}: {
+  task: CleaningTask
+  handled: number
+  issues: number
+  close: () => void
+  saved: () => void
+}) {
   const [report, setReport] = useState('')
   const mutation = useMutation()
   return (
@@ -954,11 +1485,11 @@ function FinishEditor({ task, close, saved }: { task: CleaningTask; close: () =>
     >
       <Text>
         {task.total
-          ? task.handled +
+          ? handled +
             '/' +
             task.total +
             ' points traités' +
-            (task.issues ? ', dont ' + plural(task.issues, 'anomalie', 'anomalies') : '') +
+            (issues ? ', dont ' + plural(issues, 'signalé', 'signalés') : '') +
             '.'
           : 'Cette tâche n’a pas de checklist.'}
       </Text>
@@ -968,84 +1499,85 @@ function FinishEditor({ task, close, saved }: { task: CleaningTask; close: () =>
 }
 
 function Checklist({
-  title,
   kind,
   items,
   editable,
-  manager,
-  busy,
   setState,
   report,
-  remove,
+  checkAll,
 }: {
-  title: string
   kind: CleaningItemKind
   items: readonly CleaningItem[]
   editable: boolean
-  manager: boolean
-  busy: boolean
   setState: (item: CleaningItem, state: CleaningItemState) => void
   report: (item: CleaningItem) => void
-  remove: (item: CleaningItem) => void
+  checkAll: (kind: CleaningItemKind) => void
 }) {
+  const mobile = useMobile()
   const list = items.filter((item) => item.kind === kind)
   if (!list.length) return null
+  const todo = list.filter((item) => item.state === 'todo').length
   return (
-    <List hasDividers header={<Heading level={2}>{title}</Heading>}>
+    <List
+      hasDividers
+      header={
+        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
+          <HStack gap={2} vAlign="center">
+            <Heading level={2}>{kindTitles[kind]}</Heading>
+            <Badge label={list.length - todo + '/' + list.length} />
+          </HStack>
+          {editable && todo > 1 && (
+            <Button
+              size="sm"
+              label={kind === 'task' ? 'Tout marquer fait' : 'Tout marquer conforme'}
+              onClick={() => checkAll(kind)}
+            />
+          )}
+        </HStack>
+      }
+    >
       {list.map((item) => (
         <ListItem
           key={item.id}
           label={item.label}
-          startContent={
-            <CheckboxInput
-              label={(kind === 'task' ? 'Fait : ' : 'Conforme : ') + item.label}
-              isLabelHidden
-              value={item.state === 'done'}
-              isReadOnly={!editable || item.state === 'issue'}
-              isDisabled={busy}
-              onChange={(checked) => setState(item, checked ? 'done' : 'todo')}
-            />
-          }
           description={
-            stateLabels[kind][item.state] +
-            (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
-            (item.state !== 'todo' && item.updated_by && item.updated_at
-              ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at)
-              : '')
+            item.state === 'todo'
+              ? undefined
+              : stateLabels[kind][item.state] +
+                (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
+                (item.updated_by && item.updated_at ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at) : '')
           }
           endContent={
-            <HStack gap={2} vAlign="center">
-              {item.note && <CommentIcon comments={[stateLabels[kind].issue + ' : ' + item.note]} />}
-              {item.state === 'issue' && <Token label={stateLabels[kind].issue} color="orange" size="sm" />}
-              {editable && (
-                <MoreMenu
-                  label={'Autres actions pour ' + item.label}
-                  alignment="end"
-                  presentation="adaptive"
-                  isDisabled={busy}
-                  items={[
-                    {
-                      label: kind === 'task' ? 'Marquer non fait' : 'Signaler une anomalie',
-                      onClick: () => report(item),
-                    },
-                    ...(item.state !== 'todo'
-                      ? [
-                          {
-                            label: 'Remettre ' + stateLabels[kind].todo.toLowerCase(),
-                            onClick: () => setState(item, 'todo'),
-                          },
-                        ]
-                      : []),
-                    ...(manager
-                      ? [
-                          { type: 'divider' as const },
-                          { label: 'Retirer ce point', variant: 'destructive' as const, onClick: () => remove(item) },
-                        ]
-                      : []),
-                  ]}
-                />
-              )}
-            </HStack>
+            editable ? (
+              <HStack gap={1} vAlign="center">
+                <ToggleButton
+                  label={stateLabels[kind].done + ' : ' + item.label}
+                  isIconOnly={mobile}
+                  size={mobile ? 'lg' : undefined}
+                  icon={<Icon icon={Check} />}
+                  isPressed={item.state === 'done'}
+                  onPressedChange={(pressed) => setState(item, pressed ? 'done' : 'todo')}
+                >
+                  {stateLabels[kind].done}
+                </ToggleButton>
+                <ToggleButton
+                  label={stateLabels[kind].issue + ' : ' + item.label}
+                  isIconOnly={mobile}
+                  size={mobile ? 'lg' : undefined}
+                  icon={<Icon icon={X} />}
+                  isPressed={item.state === 'issue'}
+                  onPressedChange={(pressed) => (pressed ? report(item) : setState(item, 'todo'))}
+                >
+                  {stateLabels[kind].issue}
+                </ToggleButton>
+              </HStack>
+            ) : (
+              <Token
+                label={stateLabels[kind][item.state]}
+                color={item.state === 'issue' ? 'orange' : item.state === 'done' ? 'green' : 'default'}
+                size="sm"
+              />
+            )
           }
         />
       ))}
@@ -1054,12 +1586,22 @@ function Checklist({
 }
 
 export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
-  const manager = me.role !== 'cleaner'
+  const manager = me.role !== 'cleaner',
+    mobile = useMobile()
   const load = useCallback(() => call((client) => client.cleaning.task({ params: { id } })), [id]),
     detail = useQuery('cleaning-task:' + id, load),
     options = useQuery<CleaningOptions | null>(manager ? 'cleaning-options' : '', manager ? loadOptions : noOptions)
-  const [dialog, setDialog] = useState<'edit' | 'point' | 'finish' | 'cancel' | null>(null),
+  const day = detail.data?.task.day ?? '',
+    agentId = detail.data?.task.agent_id ?? ''
+  const loadDay = useCallback(
+    () => call((client) => client.cleaning.tasks({ query: { from: day, to: day, agent: agentId } })),
+    [day, agentId],
+  )
+  const sameDay = useQuery(day ? `cleaning:${day}:${day}:${agentId}:all` : '', loadDay)
+  const [dialog, setDialog] = useState<'edit' | 'checklist' | 'template' | 'finish' | 'cancel' | null>(null),
     [issue, setIssue] = useState<CleaningItem | null>(null),
+    [overrides, setOverrides] = useState<Record<string, CleaningItemState>>({}),
+    [failure, setFailure] = useState(''),
     [success, setSuccess] = useState('')
   const mutation = useMutation()
   const task = detail.data?.task
@@ -1070,30 +1612,105 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
         <Loading error={detail.error} retry={() => void detail.refresh()} />
       </PageLayout>
     )
-  const items = detail.data.items
+  const items = detail.data.items.map((item) => (overrides[item.id] ? { ...item, state: overrides[item.id]! } : item))
   const editable = task.status === 'planned'
-  const remaining = task.total - task.handled
+  const handled = items.filter((item) => item.state !== 'todo').length,
+    issues = items.filter((item) => item.state === 'issue').length,
+    remaining = items.length - handled
+  const next = (sameDay.data ?? []).find((other) => other.status === 'planned' && other.id !== task.id)
   const refreshed = (message: string) => {
     setDialog(null)
     setIssue(null)
     setSuccess(message)
     void detail.refresh()
+    void sameDay.refresh()
   }
   const run = (action: () => Promise<unknown>, message: string) => void mutation.run(action, () => refreshed(message))
-  const setState = (item: CleaningItem, state: CleaningItemState) =>
-    run(() => call((client) => client.cleaning.item({ params: { id: item.id }, payload: { state, note: '' } })), '')
-  const status = (next: 'planned' | 'cancelled', message: string) =>
+  const setState = (item: CleaningItem, state: CleaningItemState) => {
+    setOverrides((current) => ({ ...current, [item.id]: state }))
+    setFailure('')
+    setSuccess('')
+    call((client) => client.cleaning.item({ params: { id: item.id }, payload: { state, note: '' } }))
+      .then(async () => {
+        await detail.refresh()
+        void checkForChanges()
+      })
+      .catch((error: unknown) => setFailure(messageOf(error)))
+      .finally(() =>
+        setOverrides((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== item.id))),
+      )
+  }
+  const status = (target: 'planned' | 'cancelled', message: string) =>
     run(
-      () => call((client) => client.cleaning.status({ params: { id }, payload: { status: next, report: '' } })),
+      () => call((client) => client.cleaning.status({ params: { id }, payload: { status: target, report: '' } })),
       message,
     )
+  const footer = editable ? (
+    <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+      <Text weight="semibold">
+        {remaining > 0
+          ? 'Il reste ' + plural(remaining, 'point', 'points') + ' à traiter'
+          : 'Tous les points sont traités'}
+      </Text>
+      <StackItem size={mobile ? 'fill' : undefined}>
+        <Button
+          label="Terminer le ménage"
+          variant="primary"
+          size="lg"
+          width={mobile ? '100%' : undefined}
+          isDisabled={remaining > 0 || mutation.busy}
+          onClick={() => setDialog('finish')}
+        />
+      </StackItem>
+    </HStack>
+  ) : task.status === 'done' ? (
+    <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+      <Text weight="semibold">Ménage terminé</Text>
+      <StackItem size={mobile ? 'fill' : undefined}>
+        {next ? (
+          <Button
+            label={'Lot suivant : ' + taskLot(next)}
+            variant="primary"
+            size="lg"
+            width={mobile ? '100%' : undefined}
+            href={'#cleaning/' + next.id}
+          />
+        ) : (
+          <Button
+            label={manager ? 'Retour au planning' : 'Retour à ma journée'}
+            width={mobile ? '100%' : undefined}
+            href="#cleaning"
+          />
+        )}
+      </StackItem>
+    </HStack>
+  ) : undefined
+  const actions = [
+    ...(manager && task.status === 'done'
+      ? [{ label: 'Rouvrir', onClick: () => status('planned', 'Tâche rouverte.') }]
+      : []),
+    ...(manager && task.status === 'cancelled'
+      ? [{ label: 'Rétablir', onClick: () => status('planned', 'Tâche rétablie.') }]
+      : []),
+    ...(manager && editable ? [{ label: 'Modifier la checklist', onClick: () => setDialog('checklist') }] : []),
+    { label: 'Voir le lot', href: '#lots/' + task.lot_id },
+    ...(manager && editable ? [{ label: 'Modifier la tâche', onClick: () => setDialog('edit') }] : []),
+    ...(manager && items.length ? [{ label: 'Enregistrer comme fiche', onClick: () => setDialog('template') }] : []),
+    ...(manager && editable
+      ? [
+          { type: 'divider' as const },
+          { label: 'Annuler la tâche', variant: 'destructive' as const, onClick: () => setDialog('cancel') },
+        ]
+      : []),
+  ]
   return (
     <PageLayout
+      footer={footer}
       header={
         <HStack gap={3} wrap="wrap" hAlign="between">
           <VStack gap={1}>
             <HStack gap={2} vAlign="center" wrap="wrap">
-              <Heading level={1}>{lotLabel({ number: task.lot_number, building_name: task.building_name })}</Heading>
+              <Heading level={1}>{taskLot(task)}</Heading>
               <StateToken state={task.status} />
               <PriorityToken priority={task.priority} />
             </HStack>
@@ -1101,49 +1718,72 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
               {dayLabel(task.day)} · {task.agent_name} · {task.template_name || 'Sans fiche'}
             </Text>
           </VStack>
-          <HStack gap={2} wrap="wrap">
-            {manager && editable && (
-              <MoreMenu
-                label="Gérer la tâche"
-                alignment="end"
-                presentation="adaptive"
-                isDisabled={mutation.busy || !options.data}
-                items={[
-                  { label: 'Modifier la tâche', onClick: () => setDialog('edit') },
-                  { type: 'divider' },
-                  { label: 'Annuler la tâche', variant: 'destructive', onClick: () => setDialog('cancel') },
-                ]}
-              />
-            )}
-            {manager && task.status === 'done' && (
-              <Button label="Rouvrir" isLoading={mutation.busy} onClick={() => status('planned', 'Tâche rouverte.')} />
-            )}
-            {manager && task.status === 'cancelled' && (
-              <Button label="Rétablir" isLoading={mutation.busy} onClick={() => status('planned', 'Tâche rétablie.')} />
-            )}
-            <Button label="Voir le lot" href={'#lots/' + task.lot_id} />
-            {manager && editable && (
-              <Button label="Ajouter à la checklist" isDisabled={mutation.busy} onClick={() => setDialog('point')} />
-            )}
-            {editable && (
-              <Button
-                label="Terminer"
-                variant="primary"
-                isDisabled={remaining > 0 || mutation.busy}
-                tooltip={remaining > 0 ? 'Il reste ' + plural(remaining, 'point', 'points') + ' à traiter.' : undefined}
-                onClick={() => setDialog('finish')}
-              />
-            )}
-          </HStack>
+          {mobile ? (
+            <MoreMenu
+              label="Actions sur la tâche"
+              alignment="end"
+              presentation="adaptive"
+              isDisabled={mutation.busy || (manager && !options.data)}
+              items={actions}
+            />
+          ) : (
+            <HStack gap={2} wrap="wrap">
+              {manager && task.status === 'done' && (
+                <Button
+                  label="Rouvrir"
+                  isLoading={mutation.busy}
+                  onClick={() => status('planned', 'Tâche rouverte.')}
+                />
+              )}
+              {manager && task.status === 'cancelled' && (
+                <Button
+                  label="Rétablir"
+                  isLoading={mutation.busy}
+                  onClick={() => status('planned', 'Tâche rétablie.')}
+                />
+              )}
+              {manager && editable && (
+                <Button
+                  label="Modifier la checklist"
+                  isDisabled={mutation.busy}
+                  onClick={() => setDialog('checklist')}
+                />
+              )}
+              <Button label="Voir le lot" href={'#lots/' + task.lot_id} />
+              {manager && (
+                <MoreMenu
+                  label="Gérer la tâche"
+                  alignment="end"
+                  presentation="adaptive"
+                  isDisabled={mutation.busy || !options.data}
+                  items={[
+                    ...(editable ? [{ label: 'Modifier la tâche', onClick: () => setDialog('edit') }] : []),
+                    ...(items.length
+                      ? [{ label: 'Enregistrer comme fiche', onClick: () => setDialog('template') }]
+                      : []),
+                    ...(editable
+                      ? [
+                          { type: 'divider' as const },
+                          {
+                            label: 'Annuler la tâche',
+                            variant: 'destructive' as const,
+                            onClick: () => setDialog('cancel'),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              )}
+            </HStack>
+          )}
         </HStack>
       }
     >
-      <Feedback error={mutation.error} success={success} />
+      <Feedback error={failure || mutation.error} success={success} />
       {task.note && (
-        <VStack gap={1}>
-          <Heading level={2}>Consigne</Heading>
+        <Banner status="info" title="Consigne">
           <Lines text={task.note} />
-        </VStack>
+        </Banner>
       )}
       {task.status === 'done' && task.completed_at && (
         <Text>
@@ -1151,11 +1791,11 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           {task.report ? ' · ' + task.report : ''}
         </Text>
       )}
-      {task.total > 0 ? (
+      {items.length > 0 ? (
         <ProgressBar
           label="Points traités"
-          value={task.handled}
-          max={task.total}
+          value={handled}
+          max={items.length}
           hasValueLabel
           formatValueLabel={(value, max) => value + '/' + max}
           variant={task.status === 'done' ? 'success' : 'accent'}
@@ -1163,19 +1803,16 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
       ) : (
         <Text>Aucune checklist pour cette tâche.</Text>
       )}
-      {(['task', 'check'] as const).map((kind) => (
+      {kinds.map((kind) => (
         <Checklist
           key={kind}
-          title={kind === 'task' ? 'À faire' : 'À vérifier'}
           kind={kind}
           items={items}
           editable={editable}
-          manager={manager}
-          busy={mutation.busy}
           setState={setState}
           report={setIssue}
-          remove={(item) =>
-            run(() => call((client) => client.cleaning.removeItem({ params: { id: item.id } })), 'Point retiré.')
+          checkAll={(target) =>
+            run(() => call((client) => client.cleaning.checkAll({ params: { id }, payload: { kind: target } })), '')
           }
         />
       ))}
@@ -1187,11 +1824,31 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           saved={() => refreshed('Tâche modifiée.')}
         />
       )}
-      {dialog === 'point' && (
-        <PointEditor taskId={task.id} close={() => setDialog(null)} saved={() => refreshed('Ajouté à la checklist.')} />
+      {dialog === 'checklist' && (
+        <TaskChecklistEditor
+          taskId={task.id}
+          items={detail.data.items}
+          close={() => setDialog(null)}
+          saved={() => refreshed('Checklist enregistrée.')}
+        />
+      )}
+      {dialog === 'template' && (
+        <SaveAsTemplate
+          items={detail.data.items}
+          close={() => setDialog(null)}
+          saved={(templateId) => {
+            window.location.hash = '#cleaning/fiches/' + templateId
+          }}
+        />
       )}
       {dialog === 'finish' && (
-        <FinishEditor task={task} close={() => setDialog(null)} saved={() => refreshed('Ménage terminé.')} />
+        <FinishEditor
+          task={task}
+          handled={handled}
+          issues={issues}
+          close={() => setDialog(null)}
+          saved={() => refreshed('Ménage terminé.')}
+        />
       )}
       {dialog === 'cancel' && (
         <AlertDialog
@@ -1207,42 +1864,46 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           onAction={() => status('cancelled', 'Tâche annulée.')}
         />
       )}
-      {issue && <IssueEditor item={issue} close={() => setIssue(null)} saved={() => refreshed('Point signalé.')} />}
+      {issue && <IssueEditor item={issue} close={() => setIssue(null)} saved={() => refreshed('')} />}
     </PageLayout>
   )
 }
 
 function TemplateEditor({
   template,
+  source,
   options,
   close,
   saved,
 }: {
   template?: CleaningTemplate
+  source?: CleaningTemplate
   options: CleaningOptions
   close: () => void
   saved: (id: string) => void
 }) {
-  const [name, setName] = useState(template?.name ?? ''),
+  const initial = template ?? source
+  const [name, setName] = useState(template?.name ?? (source ? source.name + ' (copie)' : '')),
     [isDefault, setIsDefault] = useState(template?.is_default ?? !options.templates.some((item) => item.is_default)),
-    [rows, setRows] = useState<Row[]>((template?.items ?? []).map((item) => ({ ...item, key: crypto.randomUUID() }))),
+    [rows, setRows] = useState<Row[]>(() => rowsOf(initial?.items ?? [])),
     [lots, setLots] = useState<string[]>([...(template?.lot_ids ?? [])])
   const mutation = useMutation()
   const elsewhere = (lotId: string) =>
     options.templates.find((item) => item.id !== template?.id && item.lot_ids.includes(lotId))
   return (
     <Editor
-      title={template ? 'Modifier la fiche' : 'Nouvelle fiche de ménage'}
+      title={template ? 'Modifier la fiche' : source ? 'Dupliquer la fiche' : 'Nouvelle fiche de ménage'}
+      width={640}
       close={close}
       busy={mutation.busy}
       error={mutation.error}
-      disabled={!name.trim() || rows.some((row) => !row.label.trim())}
+      disabled={!name.trim()}
       submit={() =>
         void mutation.run(async () => {
           const payload = {
             name,
             is_default: isDefault,
-            items: rows.map(({ kind, label }) => ({ kind, label })),
+            items: pointsOf(rows).map(({ kind, label }) => ({ kind, label })),
             lot_ids: lots,
           }
           const result = await call((client) =>
@@ -1268,12 +1929,7 @@ function TemplateEditor({
         value={isDefault}
         onChange={setIsDefault}
       />
-      <PointRows
-        title="Points de la fiche"
-        empty="Ajoutez les tâches à faire et les points à vérifier."
-        rows={rows}
-        setRows={setRows}
-      />
+      <ChecklistEditor rows={rows} setRows={setRows} />
       <MultiSelector
         label="Lots utilisant cette fiche"
         description="Un lot n’a qu’une fiche spécifique : le choisir ici le retire de son ancienne fiche."
@@ -1387,7 +2043,7 @@ export function CleaningTemplates() {
 
 export function CleaningTemplateDetail({ id }: { id: string }) {
   const options = useQuery('cleaning-options', loadOptions),
-    [editing, setEditing] = useState(false),
+    [editing, setEditing] = useState<'edit' | 'copy' | null>(null),
     [deleting, setDeleting] = useState(false),
     [success, setSuccess] = useState('')
   const mutation = useMutation()
@@ -1417,21 +2073,17 @@ export function CleaningTemplateDetail({ id }: { id: string }) {
           </VStack>
           <HStack gap={2} wrap="wrap">
             <Button label="Supprimer" variant="destructive" onClick={() => setDeleting(true)} />
-            <Button label="Modifier la fiche" variant="primary" onClick={() => setEditing(true)} />
+            <Button label="Dupliquer" onClick={() => setEditing('copy')} />
+            <Button label="Modifier la fiche" variant="primary" onClick={() => setEditing('edit')} />
           </HStack>
         </HStack>
       }
     >
       <Feedback success={success} />
-      {(['task', 'check'] as const).map((kind) => {
+      {kinds.map((kind) => {
         const items = template.items.filter((item) => item.kind === kind)
         return (
-          <List
-            key={kind}
-            hasDividers
-            listStyle="decimal"
-            header={<Heading level={2}>{kind === 'task' ? 'À faire' : 'À vérifier'}</Heading>}
-          >
+          <List key={kind} hasDividers listStyle="decimal" header={<Heading level={2}>{kindTitles[kind]}</Heading>}>
             {items.length ? (
               items.map((item, index) => <ListItem key={index} label={item.label} />)
             ) : (
@@ -1456,13 +2108,17 @@ export function CleaningTemplateDetail({ id }: { id: string }) {
       </List>
       {editing && (
         <TemplateEditor
-          template={template}
+          template={editing === 'edit' ? template : undefined}
+          source={editing === 'copy' ? template : undefined}
           options={options.data}
-          close={() => setEditing(false)}
-          saved={() => {
-            setEditing(false)
-            setSuccess('Fiche enregistrée.')
-            void options.refresh()
+          close={() => setEditing(null)}
+          saved={(saved) => {
+            setEditing(null)
+            if (saved !== template.id) window.location.hash = '#cleaning/fiches/' + saved
+            else {
+              setSuccess('Fiche enregistrée.')
+              void options.refresh()
+            }
           }}
         />
       )}
