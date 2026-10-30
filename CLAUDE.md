@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Gestion opérationnelle d'une résidence étudiante. Le produit est distinct du précédent projet de traitement d'emails. Lire `README.md` pour démarrer, `PRODUCT.md` pour les besoins et questions ouvertes, `DESIGN.md` pour les règles d'interface, `docs/decisions/0001-socle.md` pour les choix techniques.
 
-La V1 livre comptes, lots, séjours, préavis, états des lieux, calendrier, bilan hebdomadaire, relevés des compteurs des communs, stocks, ménage (fiches, planning, checklists), chiffre d’affaires des prestations et suivi technique (lieux, fournisseurs, signalements, travaux, interventions) sur D1 local. Lire `docs/decisions/0002-v1.md`. Seul l’équipement par lot reste une page de cadrage ; boîte à idées, barre d’actions ⌘K, synchronisation et AI Studio complètent la V1. Aucun déploiement distant autorisé pour cette étape : jamais de `wrangler deploy` sans `--dry-run`, ni de migration `--remote`.
+La V1 livre comptes, lots, séjours, préavis, états des lieux, calendrier, bilan hebdomadaire, relevés des compteurs des communs, stocks, ménage (fiches, planning, checklists), chiffre d’affaires des prestations et suivi technique (lieux, fournisseurs, signalements, travaux, interventions) sur D1 local. Lire `docs/decisions/0002-v1.md`. Seul l’équipement par lot reste une page de cadrage ; boîte à idées, barre d’actions ⌘K, synchronisation, application installable (PWA) et AI Studio complètent la V1. Aucun déploiement distant autorisé pour cette étape : jamais de `wrangler deploy` sans `--dry-run`, ni de migration `--remote`.
 
 ## Commandes
 
