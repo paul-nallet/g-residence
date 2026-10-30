@@ -15,6 +15,9 @@ const toHttp = httpErrors<CleaningError>({
   CleaningIncomplete: conflict('Traitez chaque point de la checklist avant de terminer la tâche.'),
   CleaningLocked: conflict('La tâche est terminée ou annulée : rouvrez-la pour la modifier.'),
   CleaningAlreadyPlanned: conflict('La tâche est déjà prévue.'),
+  CleaningCancelled: conflict('La tâche est annulée : rétablissez-la pour la commenter.'),
+  CleaningNotDone: conflict('Ce ménage n’est pas encore terminé.'),
+  CleaningAlreadyApproved: conflict('Ce ménage est déjà validé. Rouvrez-le pour demander une reprise.'),
 })
 
 export const CleaningLive = HttpApiBuilder.group(
@@ -29,6 +32,7 @@ export const CleaningLive = HttpApiBuilder.group(
       .handle('updateTemplate', ({ params, payload }) => toHttp(cleaning.updateTemplate(params.id, payload)))
       .handle('removeTemplate', ({ params }) => toHttp(cleaning.removeTemplate(params.id)))
       .handle('tasks', ({ query }) => toHttp(cleaning.tasks(query)))
+      .handle('reviews', () => toHttp(cleaning.reviews()))
       .handle('lotTasks', ({ params, query }) => toHttp(cleaning.lotTasks(params.id, query.page)))
       .handle('create', ({ payload }) => toHttp(cleaning.create(payload)))
       .handle('task', ({ params }) => toHttp(cleaning.task(params.id)))
@@ -39,6 +43,8 @@ export const CleaningLive = HttpApiBuilder.group(
       .handle('status', ({ params, payload }) => toHttp(cleaning.setStatus(params.id, payload)))
       .handle('checklist', ({ params, payload }) => toHttp(cleaning.checklist(params.id, payload)))
       .handle('checkAll', ({ params, payload }) => toHttp(cleaning.checkAll(params.id, payload.kind)))
+      .handle('comment', ({ params, payload }) => toHttp(cleaning.comment(params.id, payload.body)))
+      .handle('review', ({ params, payload }) => toHttp(cleaning.review(params.id, payload)))
       .handle('item', ({ params, payload }) => toHttp(cleaning.updateItem(params.id, payload)))
   }),
 )

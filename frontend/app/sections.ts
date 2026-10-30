@@ -21,6 +21,13 @@ export const navGroups = [
   { id: 'admin', title: 'Administration', isHeaderHidden: false },
 ] as const
 
+export const sectionPages: Partial<Record<string, readonly { id: string; label: string; managerOnly?: boolean }[]>> = {
+  cleaning: [
+    { id: '', label: 'Planning' },
+    { id: 'fiches', label: 'Fiches', managerOnly: true },
+  ],
+}
+
 export const sections = [
   {
     id: 'overview',

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { createApiHandler, SESSION_COOKIE } from '../src/server/Http.ts'
 import { database } from './helpers/database.ts'
 import type { Report } from '../src/domain/agenda.ts'
-import { today } from '../src/domain/rules.ts'
+import { addDays, today } from '../src/domain/rules.ts'
 
 const environment = async () => {
   const { port, sqlite } = database(),
@@ -1242,9 +1242,9 @@ test('ménage : fiches, planning, checklist, réalisation par l’agent et isola
     assert.deepEqual(
       all.map((t) => [t.lot_number, t.template_name, t.total]),
       [
+        ['103', '', 0],
         ['101', 'Ménage standard', 2],
         ['102', 'Remise en état', 1],
-        ['103', '', 0],
       ],
     )
     const mine = (await (await e.request(week, 'GET', undefined, cleaner)).json()) as { id: string }[]
@@ -1759,6 +1759,130 @@ test('ménage en masse : planification tolérante, mouvements du jour, modificat
     assert.deepEqual([cancelled.status, await cancelled.json()], [200, { updated: 2, skipped: 0 }])
     assert.equal((await bulk({ task_ids: [ids.A, ids.B], priority: 'low' })).status, 409)
     assert.deepEqual(await calendar(cleaner), [])
+  } finally {
+    await e.dispose()
+  }
+})
+
+test('ménage : points d’étape, validation et demande de reprise par le gestionnaire', async () => {
+  const e = await environment()
+  try {
+    await e.request('/lots', 'POST', { building_id: 'test-building', number: '201', floor: '2', type: '' })
+    const lot = (e.sqlite.prepare("SELECT id FROM lots WHERE number='201'").get() as { id: string }).id
+    const invite = await e.request('/team/invitations', 'POST', { email: 'agent@example.test', role: 'cleaner' })
+    const { token } = (await invite.json()) as { token: string }
+    const accept = await e.request(
+      '/auth/invitations/' + token,
+      'POST',
+      { name: 'Agent', password: 'Validation-seulement-2026' },
+      '',
+    )
+    const cleaner = accept.headers.get('set-cookie')!.split(';')[0]!
+    const agentId = ((await accept.json()) as { id: string }).id
+    const day = today()
+    assert.equal(
+      (
+        await e.request('/cleaning/tasks', 'POST', {
+          lot_ids: [lot],
+          agent_id: agentId,
+          day,
+          template_id: 'none',
+          note: '',
+          items: [
+            { kind: 'task', label: 'Salle de bain' },
+            { kind: 'task', label: 'Cuisine' },
+          ],
+        })
+      ).status,
+      200,
+    )
+    const [{ id }] = (await (await e.request(`/cleaning/tasks?from=${day}&to=${day}`)).json()) as [{ id: string }]
+    type Detail = {
+      task: { status: string; review: string | null; reviewed_by: string | null; comments: number; day: string }
+      items: { id: string; state: string }[]
+      comments: { kind: string; body: string; author: string }[]
+    }
+    const detail = async () => (await (await e.request('/cleaning/tasks/' + id!)).json()) as Detail
+    const comment = (body: string, as = cleaner) =>
+      e.request('/cleaning/tasks/' + id + '/comments', 'POST', { body }, as)
+    const review = (payload: object, as = e.cookie) =>
+      e.request('/cleaning/tasks/' + id + '/review', 'POST', payload, as)
+    const finish = () => e.request('/cleaning/tasks/' + id + '/status', 'POST', { status: 'done', report: '' }, cleaner)
+
+    assert.equal((await comment('Salle de bain faite, cuisine demain')).status, 200)
+    assert.equal((await comment('  ')).status, 400)
+    assert.equal((await review({ decision: 'approved', comment: '' })).status, 409)
+    let current = await detail()
+    assert.deepEqual(
+      [current.task.status, current.task.comments, current.comments.map((c) => [c.kind, c.author])],
+      ['planned', 1, [['note', 'Agent']]],
+    )
+
+    for (const item of current.items)
+      await e.request('/cleaning/items/' + item.id, 'PATCH', { state: 'done', note: '' }, cleaner)
+    assert.equal((await finish()).status, 200)
+    assert.equal((await comment('Oubli : clé rendue')).status, 200)
+    assert.equal((await review({ decision: 'revision', comment: 'Miroir' }, cleaner)).status, 403)
+    assert.equal((await review({ decision: 'revision', comment: '' })).status, 400)
+    assert.equal((await review({ decision: 'revision', comment: 'Miroir', item_ids: ['autre'] })).status, 404)
+    const tomorrow = addDays(day, 1)
+    assert.equal(
+      (
+        await review({
+          decision: 'revision',
+          comment: 'Traces sur le miroir',
+          day: tomorrow,
+          item_ids: [current.items[0]!.id],
+        })
+      ).status,
+      200,
+    )
+    current = await detail()
+    assert.deepEqual(
+      [current.task.status, current.task.review, current.task.day, current.items.map((i) => i.state)],
+      ['planned', 'revision', tomorrow, ['todo', 'done']],
+    )
+    assert.equal(current.comments.at(-1)!.body, 'Traces sur le miroir')
+    assert.equal((await finish()).status, 409)
+    await e.request('/cleaning/items/' + current.items[0]!.id, 'PATCH', { state: 'done', note: '' }, cleaner)
+    assert.equal((await finish()).status, 200)
+    assert.equal((await detail()).task.review, null)
+    const ids = async (path: string, as = e.cookie) =>
+      ((await (await e.request(path, 'GET', undefined, as)).json()) as { id: string }[]).map((task) => task.id)
+    const period = `/cleaning/tasks?from=${day}&to=${tomorrow}&review=`
+    assert.deepEqual(await ids('/cleaning/reviews'), [id])
+    assert.equal((await e.request('/cleaning/reviews', 'GET', undefined, cleaner)).status, 403)
+    assert.deepEqual(
+      [await ids(period + 'pending'), await ids(period + 'approved'), await ids(period + 'revision')],
+      [[id], [], []],
+    )
+
+    assert.equal((await review({ decision: 'approved', comment: 'Parfait' })).status, 200)
+    assert.deepEqual([await ids('/cleaning/reviews'), await ids(period + 'approved')], [[], [id]])
+    current = await detail()
+    assert.deepEqual(
+      [current.task.status, current.task.review, current.task.reviewed_by],
+      ['done', 'approved', 'Gestionnaire'],
+    )
+    assert.equal((await review({ decision: 'revision', comment: 'Encore' })).status, 409)
+    assert.deepEqual(
+      current.comments.map((c) => c.kind),
+      ['note', 'note', 'revision', 'approved'],
+    )
+    const report = (await (await e.request('/reports/weekly?date=' + day)).json()) as { rows: { kind: string }[] }
+    assert.ok(report.rows.some((row) => row.kind === 'Reprise demandée'))
+    assert.ok(report.rows.some((row) => row.kind === 'Ménage validé'))
+
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + id + '/status', 'POST', { status: 'planned', report: '' })).status,
+      200,
+    )
+    assert.equal((await detail()).task.review, null)
+    assert.equal(
+      (await e.request('/cleaning/tasks/' + id + '/status', 'POST', { status: 'cancelled', report: '' })).status,
+      200,
+    )
+    assert.equal((await comment('Trop tard')).status, 409)
   } finally {
     await e.dispose()
   }

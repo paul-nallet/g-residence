@@ -10,6 +10,12 @@ export const CleaningItemState = Schema.Literals(['todo', 'done', 'issue'])
 export type CleaningItemState = typeof CleaningItemState.Type
 export const CleaningStatus = Schema.Literals(['planned', 'done', 'cancelled'])
 export type CleaningStatus = typeof CleaningStatus.Type
+export const CleaningReview = Schema.Literals(['approved', 'revision'])
+export type CleaningReview = typeof CleaningReview.Type
+export const CleaningReviewFilter = Schema.Literals(['pending', 'approved', 'revision'])
+export type CleaningReviewFilter = typeof CleaningReviewFilter.Type
+export const CleaningCommentKind = Schema.Literals(['note', 'approved', 'revision'])
+export type CleaningCommentKind = typeof CleaningCommentKind.Type
 export const CleaningPoint = Schema.Struct({ kind: CleaningItemKind, label: RequiredText('Intitulé du point', 160) })
 export type CleaningPoint = typeof CleaningPoint.Type
 const CleaningPoints = (message: string) => Schema.Array(CleaningPoint).check(Schema.isMaxLength(60, { message }))
@@ -106,6 +112,10 @@ export const CleaningTask = Schema.Struct({
   completed_at: Schema.NullOr(Schema.String),
   completed_by: Schema.NullOr(Schema.String),
   position: Schema.NullOr(Schema.Number),
+  review: Schema.NullOr(CleaningReview),
+  reviewed_at: Schema.NullOr(Schema.String),
+  reviewed_by: Schema.NullOr(Schema.String),
+  comments: Schema.Number,
   total: Schema.Number,
   handled: Schema.Number,
   issues: Schema.Number,
@@ -124,7 +134,26 @@ export const CleaningItem = Schema.Struct({
   updated_at: Schema.NullOr(Schema.String),
 })
 export type CleaningItem = typeof CleaningItem.Type
-export const CleaningTaskDetail = Schema.Struct({ task: CleaningTask, items: Schema.Array(CleaningItem) })
+export const CleaningCommentInput = Schema.Struct({ body: RequiredText('Commentaire', 1000) })
+export const CleaningReviewInput = Schema.Struct({
+  decision: CleaningReview,
+  comment: OptionalText(1000),
+  day: Schema.optionalKey(CivilDate),
+  item_ids: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(60))),
+})
+export const CleaningComment = Schema.Struct({
+  id: Schema.String,
+  kind: CleaningCommentKind,
+  body: Schema.String,
+  author: Schema.String,
+  created_at: Schema.String,
+})
+export type CleaningComment = typeof CleaningComment.Type
+export const CleaningTaskDetail = Schema.Struct({
+  task: CleaningTask,
+  items: Schema.Array(CleaningItem),
+  comments: Schema.Array(CleaningComment),
+})
 
 export class CleaningTaskNotFound extends Schema.TaggedError<CleaningTaskNotFound>()('CleaningTaskNotFound', {}) {}
 export class CleaningItemNotFound extends Schema.TaggedError<CleaningItemNotFound>()('CleaningItemNotFound', {}) {}
@@ -144,6 +173,12 @@ export class CleaningAlreadyPlanned extends Schema.TaggedError<CleaningAlreadyPl
   'CleaningAlreadyPlanned',
   {},
 ) {}
+export class CleaningCancelled extends Schema.TaggedError<CleaningCancelled>()('CleaningCancelled', {}) {}
+export class CleaningNotDone extends Schema.TaggedError<CleaningNotDone>()('CleaningNotDone', {}) {}
+export class CleaningAlreadyApproved extends Schema.TaggedError<CleaningAlreadyApproved>()(
+  'CleaningAlreadyApproved',
+  {},
+) {}
 
 export type CleaningError =
   | CleaningTaskNotFound
@@ -155,7 +190,11 @@ export type CleaningError =
   | CleaningIncomplete
   | CleaningLocked
   | CleaningAlreadyPlanned
+  | CleaningCancelled
+  | CleaningNotDone
+  | CleaningAlreadyApproved
   | InvalidInput
 
 export const MAX_PERIOD_DAYS = 41
 export const PAGE_SIZE = 20
+export const REVIEW_LIMIT = 50

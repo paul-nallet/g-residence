@@ -34,6 +34,11 @@ export const reportActivities = Effect.fn('Agenda.activities')(function* (
         FROM cleaning_task_items WHERE task_id=t.id AND state='issue'),'') AS comment
       FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id JOIN users u ON u.id=t.completed_by
       WHERE t.residence_id=? AND t.status='done' AND t.completed_at>=? AND t.completed_at<?`),
+    timed(`SELECT m.created_at AS date,'Ménage' AS module,l.number AS lot,t.template_name AS subject,
+      CASE m.kind WHEN 'approved' THEN 'Ménage validé' ELSE 'Reprise demandée' END AS kind,u.name AS actor,m.body AS comment
+      FROM cleaning_task_comments m JOIN cleaning_tasks t ON t.id=m.task_id JOIN lots l ON l.id=t.lot_id
+      JOIN users u ON u.id=m.author_id
+      WHERE m.residence_id=? AND m.kind IN ('approved','revision') AND m.created_at>=? AND m.created_at<?`),
     dated(`SELECT i.reported_on AS date,'Technique' AS module,COALESCE(l.number,'') AS lot,
       i.title || ' · ' || COALESCE(p.name,'Lot ' || l.number,'Communs') AS subject,
       'Signalement constaté' AS kind,u.name AS actor,i.description AS comment
