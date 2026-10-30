@@ -48,13 +48,12 @@ import { useHashPage, useHashParam } from '../lib/hashParams.ts'
 import { Journal } from './journal.tsx'
 import { DateField, dateLabel, Editor, Feedback, Loading, StateToken } from './shared.tsx'
 
-type Tab = 'works' | 'issues' | 'suppliers' | 'places'
-const tabs: { value: Tab; label: string; href: string }[] = [
-  { value: 'works', label: 'Travaux', href: '#technical' },
-  { value: 'issues', label: 'Signalements', href: '#technical/signalements' },
-  { value: 'suppliers', label: 'Fournisseurs', href: '#technical/fournisseurs' },
-  { value: 'places', label: 'Lieux', href: '#technical/lieux' },
-]
+const pages = {
+  works: { title: 'Travaux', description: 'Chantiers de la résidence, de la planification à la réception.' },
+  issues: { title: 'Signalements', description: 'Problèmes constatés dans les lots et les parties communes.' },
+  suppliers: { title: 'Fournisseurs', description: 'Prestataires techniques et leurs coordonnées.' },
+  places: { title: 'Lieux', description: 'Lots et parties communes où situer signalements et travaux.' },
+}
 const workColors = {
   to_plan: 'gray',
   planned: 'blue',
@@ -83,22 +82,12 @@ function WorkToken({ status }: { status: WorkStatus }) {
   return <Token label={workStatusLabels[status]} color={workColors[status]} size="sm" />
 }
 
-function TechnicalTabs({ current }: { current: Tab }) {
-  return (
-    <TabList value={current} onChange={() => undefined}>
-      {tabs.map((tab) => (
-        <Tab key={tab.value} value={tab.value} label={tab.label} href={tab.href} />
-      ))}
-    </TabList>
-  )
-}
-
 function TechnicalPage({
   current,
   actions,
   children,
 }: {
-  current: Tab
+  current: keyof typeof pages
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -107,13 +96,12 @@ function TechnicalPage({
       header={
         <HStack gap={3} wrap="wrap" hAlign="between">
           <VStack gap={1}>
-            <Heading level={1}>Technique</Heading>
-            <Text color="secondary">Signalements, travaux, interventions et prestataires de la résidence.</Text>
+            <Heading level={1}>{pages[current].title}</Heading>
+            <Text color="secondary">{pages[current].description}</Text>
           </VStack>
           {actions}
         </HStack>
       }
-      navigation={<TechnicalTabs current={current} />}
     >
       {children}
     </PageLayout>

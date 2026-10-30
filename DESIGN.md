@@ -16,6 +16,7 @@ Navigation initiale : Vue d'ensemble, Lots et mouvements, Calendrier, Ménage, T
 
 - Données opérationnelles en lignes ou tableaux ; éviter une grille de cartes pour chaque lot ou tâche.
 - Accès au détail : le nom de l’élément dans le tableau est un lien (`Link`) vers une fiche adressable `#rubrique/<id>`, sans bouton fantôme ni état local. Un seul fil d’Ariane, celui de la barre supérieure : `Résidence / Rubrique / Élément`, alimenté par `useDetailCrumb` depuis la fiche ; aucun fil d’Ariane dans la page et jamais de bouton « Retour ». Le retour du navigateur fonctionne. Les actions secondaires d’une ligne vont dans un `MoreMenu`.
+- Les sous-rubriques d’une rubrique sont des entrées imbriquées de la navigation latérale (`sectionPages`), jamais des onglets dans la page : Ménage (Planning, Fiches) et Technique (Travaux, Signalements, Fournisseurs, Lieux). Le titre de la page reprend la sous-rubrique.
 - Calendrier pour les événements datés ; liste quotidienne complémentaire sur mobile.
 - Détail du lot : onglets Vue d’ensemble (prochains événements), Occupations (séjours, préavis et états des lieux) et Historique. Les deux derniers sont réservés aux gestionnaires et administrateurs ; les actions du lot restent dans l’en-tête commun. L’équipement reste hors V1.
 - Occupations : une ligne de tableau par séjour, avec résident, statut, dates prévues, entrée et sortie réelles et préavis actif. Les lignes se déplient pour retrouver les actions, commentaires, préavis retirés et états des lieux.
