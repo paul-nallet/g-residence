@@ -28,7 +28,7 @@ type Query = { readonly [K in keyof typeof LotQuery]?: (typeof LotQuery)[K]['Typ
 
 const occupancy =
   "CASE WHEN EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_start IS NOT NULL AND s.actual_end IS NULL) THEN 'occupied' WHEN EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_start IS NULL) THEN 'planned' ELSE 'vacant' END"
-const lotColumns = `l.id,l.number,l.floor,l.type,l.archived,l.building_id,(SELECT name FROM buildings WHERE id=l.building_id AND residence_id=l.residence_id) AS building_name,${occupancy} AS occupancy`
+const lotColumns = `l.id,l.number,l.floor,l.type,l.archived,l.building_id,(SELECT name FROM buildings WHERE id=l.building_id AND residence_id=l.residence_id) AS building_name,${occupancy} AS occupancy,l.cleanliness,l.cleanliness_at`
 const currentStay =
   '(SELECT s.id FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_end IS NULL ORDER BY s.actual_start IS NULL,s.planned_start LIMIT 1)'
 const rowColumns = (hidden: boolean) =>
@@ -86,8 +86,9 @@ const make = Effect.gen(function* () {
     const page = input.page ?? 1
     const search = searchPattern(input.q)
     const state = input.state ?? 'all',
-      building = input.building ?? 'all'
-    const filter = `l.residence_id=? AND l.archived=? AND (${folded('l.number')} LIKE ? ESCAPE '\\' OR ${folded('l.floor')} LIKE ? ESCAPE '\\' OR ${folded('l.type')} LIKE ? ESCAPE '\\' OR l.id IN (SELECT lot_id FROM (SELECT s.lot_id,${folded("(s.first_name || ' ' || s.last_name)")} AS resident FROM stays s WHERE ?=0 AND s.residence_id=? AND s.cancelled=0 AND s.actual_end IS NULL) WHERE resident LIKE ? ESCAPE '\\')) AND (?='all' OR ${occupancy}=?) AND (?='all' OR l.building_id=?)`
+      building = input.building ?? 'all',
+      cleanliness = input.cleanliness ?? 'all'
+    const filter = `l.residence_id=? AND l.archived=? AND (${folded('l.number')} LIKE ? ESCAPE '\\' OR ${folded('l.floor')} LIKE ? ESCAPE '\\' OR ${folded('l.type')} LIKE ? ESCAPE '\\' OR l.id IN (SELECT lot_id FROM (SELECT s.lot_id,${folded("(s.first_name || ' ' || s.last_name)")} AS resident FROM stays s WHERE ?=0 AND s.residence_id=? AND s.cancelled=0 AND s.actual_end IS NULL) WHERE resident LIKE ? ESCAPE '\\')) AND (?='all' OR ${occupancy}=?) AND (?='all' OR l.building_id=?) AND (?='all' OR (l.cleanliness=? AND (l.cleanliness='out_of_service' OR ${occupancy}<>'occupied')))`
     const values = [
       me.residenceId,
       input.archived === 'yes' ? 1 : 0,
@@ -101,6 +102,8 @@ const make = Effect.gen(function* () {
       state,
       building,
       building,
+      cleanliness,
+      cleanliness,
     ]
     const sort = input.sort === 'floor' ? 'l.floor COLLATE NOCASE,l.number COLLATE NOCASE' : 'l.number COLLATE NOCASE'
     const [count, items] = yield* Effect.all([

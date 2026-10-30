@@ -15,6 +15,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import {
   AlertTriangle,
+  BedDouble,
   CalendarClock,
   CheckCircle2,
   ClipboardCheck,
@@ -27,7 +28,8 @@ import {
 } from 'lucide-react'
 import type { Me } from '../../src/domain/accounts.ts'
 import { type Event, OVERDUE_LIMIT } from '../../src/domain/agenda.ts'
-import { type CleaningTask, REVIEW_LIMIT } from '../../src/domain/cleaning.ts'
+import { type CleaningTask, isReady, REVIEW_LIMIT } from '../../src/domain/cleaning.ts'
+import { readinessCount, taskTarget } from './readiness.tsx'
 import { addDays, today } from '../../src/domain/rules.ts'
 import { call } from '../lib/api.ts'
 import { useQuery } from '../lib/data.ts'
@@ -67,8 +69,7 @@ const longDate = (date: string) =>
   )
 const monthLabel = (month: string) =>
   new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(new Date(month + '-01'))
-const lotLabel = (task: CleaningTask) =>
-  'Lot ' + task.lot_number + (task.building_name ? ' · ' + task.building_name : '')
+const lotLabel = (task: CleaningTask) => taskTarget(task)
 
 export function Overview({ me }: { me: Me }) {
   const date = today(),
@@ -84,6 +85,7 @@ export function Overview({ me }: { me: Me }) {
         cleaning,
         late,
         reviews,
+        readiness,
         stock,
         meters,
         metersPending,
@@ -98,6 +100,7 @@ export function Overview({ me }: { me: Me }) {
         call((client) => client.cleaning.tasks({ query: { from: date, to: date } })),
         call((client) => client.cleaning.tasks({ query: { from: addDays(date, -7), to: addDays(date, -1) } })),
         manager ? call((client) => client.cleaning.reviews()) : [],
+        manager ? call((client) => client.cleaning.readiness({ query: { day: date } })) : null,
         manager ? call((client) => client.stock.list({ query: { level: 'alert' } })) : null,
         manager ? call((client) => client.meters.list({ query: { month } })) : null,
         manager ? call((client) => client.meters.list({ query: { month, pending: 'true' } })) : null,
@@ -113,6 +116,7 @@ export function Overview({ me }: { me: Me }) {
         cleaning,
         late,
         reviews,
+        readiness,
         stock,
         meters,
         metersPending,
@@ -201,6 +205,19 @@ export function Overview({ me }: { me: Me }) {
                       description: 'Ménages terminés en attente de votre vérification : dépliez la liste ci-dessous.',
                       done: 'Tous les ménages terminés sont vérifiés.',
                       count: data.reviews.length,
+                    },
+                    {
+                      key: 'readiness',
+                      tone: data.readiness?.arrivals.some((lot) => !isReady(lot) && lot.arrival === date)
+                        ? 'error'
+                        : 'warning',
+                      icon: BedDouble,
+                      label: 'Lots à préparer',
+                      description:
+                        'Entrées non prêtes et lots libres sales sans ménage prévu : planifiez-les depuis le planning.',
+                      done: 'Entrées prêtes et lots libres propres ou planifiés.',
+                      href: '#cleaning',
+                      count: data.readiness ? readinessCount(data.readiness) : 0,
                     },
                     {
                       key: 'issues',

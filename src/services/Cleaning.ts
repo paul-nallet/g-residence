@@ -1,5 +1,7 @@
 import type { Priority } from '../domain/priority.ts'
 import { Context, Effect, Layer } from 'effect'
+import type { Cleanliness } from '../domain/lots.ts'
+import type { IssueStatus } from '../domain/technical.ts'
 import {
   CleaningAgentInvalid,
   CleaningAlreadyApproved,
@@ -8,6 +10,7 @@ import {
   CleaningCancelled,
   type CleaningChecklist,
   type CleaningComment,
+  type CleaningCommentInput,
   CleaningDayTaken,
   CleaningIncomplete,
   type CleaningItem,
@@ -19,24 +22,40 @@ import {
   type CleaningPoint,
   type CleaningReviewFilter,
   type CleaningReviewInput,
-  type CleaningStatus,
+  type CleaningStatusInput,
+  type CleaningSupply,
   type CleaningTask,
+  type CleaningTaskCreate,
+  type CleaningTaskDetail,
+  type CleaningType,
   CleaningTaskNotFound,
   type CleaningTemplate,
   type CleaningTemplateInput,
   CleaningTemplateNameTaken,
   CleaningTemplateNotFound,
+  MAX_CREATED,
   MAX_PERIOD_DAYS,
+  MAX_REPEAT_DAYS,
   PAGE_SIZE,
+  READINESS_LIMIT,
+  type ReadinessLot,
+  repeatDays,
   REVIEW_LIMIT,
+  templateFor,
 } from '../domain/cleaning.ts'
-import { now } from '../domain/clock.ts'
+import { currentDay, now, stamp } from '../domain/clock.ts'
+import { addDays } from '../domain/rules.ts'
 import { CurrentUser, manager } from '../domain/CurrentUser.ts'
 import { InvalidInput } from '../domain/errors.ts'
 import type { Me, Role } from '../domain/accounts.ts'
 import { onViolation, sql, Sql, type SqlError, type Statement } from './Database.ts'
 
-const taskColumns = `t.id,t.lot_id,l.number AS lot_number,COALESCE(b.name,'') AS building_name,t.agent_id,a.name AS agent_name,
+const occupiedLot = `EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_start IS NOT NULL AND s.actual_end IS NULL)`
+const taskColumns = `t.id,t.type,t.lot_id,COALESCE(l.number,'') AS lot_number,t.place_id,COALESCE(p.name,'') AS place_name,
+  COALESCE(b.name,'') AS building_name,
+  CASE WHEN l.cleanliness<>'out_of_service' AND ${occupiedLot} THEN NULL ELSE l.cleanliness END AS cleanliness,
+  (t.lot_id IS NOT NULL AND EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=t.lot_id AND s.cancelled=0
+    AND COALESCE(s.actual_start,s.planned_start)=t.day)) AS arrival,t.agent_id,a.name AS agent_name,
   t.day,t.status,t.priority,t.template_name,t.note,t.report,t.completed_at,c.name AS completed_by,t.position,
   t.review,t.reviewed_at,r.name AS reviewed_by,
   (SELECT COUNT(*) FROM cleaning_task_comments m WHERE m.task_id=t.id) AS comments,
@@ -45,11 +64,24 @@ const taskColumns = `t.id,t.lot_id,l.number AS lot_number,COALESCE(b.name,'') AS
   (SELECT COUNT(*) FROM cleaning_task_items i WHERE i.task_id=t.id AND i.state='issue') AS issues,
   (SELECT json_group_array(label || ' : ' || note) FROM (SELECT i.label,i.note FROM cleaning_task_items i
     WHERE i.task_id=t.id AND i.state='issue' AND i.note<>'' ORDER BY i.position,i.rowid)) AS remarks
-  FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id JOIN users a ON a.id=t.agent_id
-  LEFT JOIN buildings b ON b.id=l.building_id AND b.residence_id=l.residence_id LEFT JOIN users c ON c.id=t.completed_by
-  LEFT JOIN users r ON r.id=t.reviewed_by`
-type TaskRow = Omit<CleaningTask, 'remarks'> & { remarks: string }
-const taskOf = (row: TaskRow): CleaningTask => ({ ...row, remarks: JSON.parse(row.remarks) as string[] })
+  FROM cleaning_tasks t LEFT JOIN lots l ON l.id=t.lot_id LEFT JOIN places p ON p.id=t.place_id JOIN users a ON a.id=t.agent_id
+  LEFT JOIN buildings b ON b.id=COALESCE(l.building_id,p.building_id) AND b.residence_id=t.residence_id
+  LEFT JOIN users c ON c.id=t.completed_by LEFT JOIN users r ON r.id=t.reviewed_by`
+const targetOrder = `COALESCE(l.number,p.name) COLLATE NOCASE`
+type TaskRow = Omit<CleaningTask, 'remarks' | 'arrival'> & { remarks: string; arrival: number }
+const taskOf = (row: TaskRow): CleaningTask => ({
+  ...row,
+  arrival: row.arrival === 1,
+  remarks: JSON.parse(row.remarks) as string[],
+})
+const itemColumns = `i.id,i.task_id,i.kind,i.label,i.state,i.note,u.name AS updated_by,i.updated_at,
+  s.id AS issue_id,s.status AS issue_status FROM cleaning_task_items i LEFT JOIN users u ON u.id=i.updated_by
+  LEFT JOIN issues s ON s.cleaning_item_id=i.id AND s.residence_id=i.residence_id`
+const commentColumns = `m.id,m.task_id,m.kind,m.body,u.name AS author,m.created_at FROM cleaning_task_comments m
+  JOIN users u ON u.id=m.author_id`
+const shortDate = (day: string) => day.slice(8, 10) + '/' + day.slice(5, 7)
+const ofTask = <A extends { task_id: string }>(rows: readonly A[], id: string) =>
+  rows.filter((row) => row.task_id === id)
 const visible = (me: Me) =>
   me.role === 'cleaner' ? { clause: ' AND t.agent_id=?', values: [me.id] } : { clause: '', values: [] }
 
@@ -73,10 +105,17 @@ const insertItems = (me: Me, taskId: string, items: readonly CleaningPoint[], st
     ),
   )
 
-const insertComment = (me: Me, taskId: string, kind: CleaningComment['kind'], body: string, at: string) =>
+const insertComment = (
+  me: Me,
+  taskId: string,
+  kind: CleaningComment['kind'],
+  body: string,
+  at: string,
+  id: string = crypto.randomUUID(),
+) =>
   sql(
-    'INSERT INTO cleaning_task_comments(id,residence_id,task_id,kind,body,author_id,created_at) VALUES(?,?,?,?,?,?,?)',
-    crypto.randomUUID(),
+    'INSERT INTO cleaning_task_comments(id,residence_id,task_id,kind,body,author_id,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+    id,
     me.residenceId,
     taskId,
     kind,
@@ -100,6 +139,14 @@ const violations = <A, E, R>(self: Effect.Effect<A, E | SqlError, R>) =>
       'lot_unavailable',
       () => new InvalidInput({ message: 'Un des lots choisis est archivé ou introuvable. Rechargez la page.' }),
     ),
+    onViolation(
+      'place_unavailable',
+      () => new InvalidInput({ message: 'Un des lieux choisis est archivé ou introuvable. Rechargez la page.' }),
+    ),
+    onViolation(
+      'UNIQUE constraint failed: issues.cleaning_item_id',
+      () => new InvalidInput({ message: 'Un signalement existe déjà pour ce point. Rechargez la page.' }),
+    ),
   )
 
 const make = Effect.gen(function* () {
@@ -108,9 +155,9 @@ const make = Effect.gen(function* () {
 
   const loadTemplates = Effect.fn('Cleaning.loadTemplates')(function* (me: Me) {
     const [rows, items, links] = yield* Effect.all([
-      db.all<{ id: string; name: string; is_default: number }>(
+      db.all<{ id: string; name: string; is_default: number; default_type: CleaningType | null }>(
         sql(
-          'SELECT id,name,is_default FROM cleaning_templates WHERE residence_id=? ORDER BY is_default DESC,name COLLATE NOCASE',
+          'SELECT id,name,is_default,default_type FROM cleaning_templates WHERE residence_id=? ORDER BY is_default DESC,name COLLATE NOCASE',
           me.residenceId,
         ),
       ),
@@ -128,6 +175,7 @@ const make = Effect.gen(function* () {
       id: row.id,
       name: row.name,
       is_default: row.is_default === 1,
+      default_type: row.default_type,
       items: items
         .filter((item) => item.template_id === row.id)
         .map((item) => ({ kind: item.kind, label: item.label })),
@@ -173,6 +221,26 @@ const make = Effect.gen(function* () {
       ...(input.is_default
         ? [sql('UPDATE cleaning_templates SET is_default=1 WHERE id=? AND residence_id=?', id, me.residenceId)]
         : []),
+      ...(input.default_type === undefined
+        ? []
+        : [
+            sql(
+              'UPDATE cleaning_templates SET default_type=NULL WHERE residence_id=? AND (id=? OR default_type=?)',
+              me.residenceId,
+              id,
+              input.default_type,
+            ),
+            ...(input.default_type
+              ? [
+                  sql(
+                    'UPDATE cleaning_templates SET default_type=? WHERE id=? AND residence_id=?',
+                    input.default_type,
+                    id,
+                    me.residenceId,
+                  ),
+                ]
+              : []),
+          ]),
       sql('DELETE FROM cleaning_template_items WHERE template_id=? AND residence_id=?', id, me.residenceId),
       ...input.items.map((item, index) =>
         sql(
@@ -200,12 +268,27 @@ const make = Effect.gen(function* () {
 
   const options = Effect.fn('Cleaning.options')(function* () {
     const me = yield* manager
-    const [lots, agents, templates] = yield* Effect.all([
-      db.all<{ id: string; number: string; building_name: string; template_id: string | null }>(
+    const [lots, places, agents, templates] = yield* Effect.all([
+      db.all<{
+        id: string
+        number: string
+        building_name: string
+        template_id: string | null
+        cleanliness: Cleanliness
+        occupied: number
+      }>(
         sql(
-          `SELECT l.id,l.number,COALESCE(b.name,'') AS building_name,(SELECT template_id FROM cleaning_lot_templates WHERE lot_id=l.id) AS template_id
-          FROM lots l LEFT JOIN buildings b ON b.id=l.building_id AND b.residence_id=l.residence_id
+          `SELECT l.id,l.number,COALESCE(b.name,'') AS building_name,(SELECT template_id FROM cleaning_lot_templates WHERE lot_id=l.id) AS template_id,
+          l.cleanliness,${occupiedLot} AS occupied FROM lots l LEFT JOIN buildings b ON b.id=l.building_id AND b.residence_id=l.residence_id
           WHERE l.residence_id=? AND l.archived=0 ORDER BY l.number COLLATE NOCASE`,
+          me.residenceId,
+        ),
+      ),
+      db.all<{ id: string; name: string; building_name: string }>(
+        sql(
+          `SELECT p.id,p.name,COALESCE(b.name,'') AS building_name FROM places p
+          LEFT JOIN buildings b ON b.id=p.building_id AND b.residence_id=p.residence_id
+          WHERE p.residence_id=? AND p.archived=0 ORDER BY p.name COLLATE NOCASE`,
           me.residenceId,
         ),
       ),
@@ -217,7 +300,7 @@ const make = Effect.gen(function* () {
       ),
       loadTemplates(me),
     ])
-    return { lots, agents, templates }
+    return { lots: lots.map((lot) => ({ ...lot, occupied: lot.occupied === 1 })), places, agents, templates }
   })
 
   const templates = Effect.fn('Cleaning.templates')(function* () {
@@ -266,7 +349,7 @@ const make = Effect.gen(function* () {
       sql(
         `SELECT ${taskColumns} WHERE t.residence_id=? AND t.day BETWEEN ? AND ? AND (?='' OR t.agent_id=?) AND (?='' OR t.priority=?)${scope.clause}${input.review ? reviewClauses[input.review] : ''}
         ORDER BY t.day DESC,CASE t.status WHEN 'planned' THEN 0 WHEN 'done' THEN 1 ELSE 2 END,t.position IS NULL,t.position,
-          CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,l.number COLLATE NOCASE,t.id`,
+          arrival DESC,CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,${targetOrder},t.id`,
         me.residenceId,
         input.from,
         input.to,
@@ -320,77 +403,140 @@ const make = Effect.gen(function* () {
     return { items: rows.map(taskOf), total: count?.total ?? 0 }
   })
 
-  const task = Effect.fn('Cleaning.task')(function* (id: string) {
-    const me = yield* CurrentUser
-    const found = yield* findTask(id)
-    const [items, comments] = yield* Effect.all([
-      db.all<CleaningItem>(
+  const details = Effect.fn('Cleaning.details')(function* (me: Me, found: readonly CleaningTask[]) {
+    if (!found.length) return []
+    const ids = found.map((row) => row.id)
+    const [items, comments, supplies] = yield* Effect.all([
+      db.all<CleaningItem & { task_id: string }>(
         sql(
-          `SELECT i.id,i.kind,i.label,i.state,i.note,u.name AS updated_by,i.updated_at FROM cleaning_task_items i
-          LEFT JOIN users u ON u.id=i.updated_by WHERE i.task_id=? AND i.residence_id=? ORDER BY i.position,i.rowid`,
-          id,
+          `SELECT ${itemColumns} WHERE i.residence_id=? AND i.task_id IN (${placeholders(ids)}) ORDER BY i.position,i.rowid`,
           me.residenceId,
+          ...ids,
         ),
       ),
-      db.all<CleaningComment>(
+      db.all<CleaningComment & { task_id: string }>(
         sql(
-          `SELECT m.id,m.kind,m.body,u.name AS author,m.created_at FROM cleaning_task_comments m
-          JOIN users u ON u.id=m.author_id WHERE m.task_id=? AND m.residence_id=? ORDER BY m.created_at,m.rowid`,
-          id,
+          `SELECT ${commentColumns} WHERE m.residence_id=? AND m.task_id IN (${placeholders(ids)}) ORDER BY m.created_at,m.rowid`,
           me.residenceId,
+          ...ids,
         ),
       ),
+      me.role === 'cleaner'
+        ? Effect.succeed([])
+        : db.all<CleaningSupply & { task_id: string }>(
+            sql(
+              `SELECT m.id,m.cleaning_task_id AS task_id,m.item_id,s.name AS item_name,s.unit,-m.delta AS quantity,m.occurred_on,
+              m.comment,u.name AS actor FROM stock_movements m JOIN stock_items s ON s.id=m.item_id JOIN users u ON u.id=m.actor_id
+              WHERE m.residence_id=? AND m.cleaning_task_id IN (${placeholders(ids)}) ORDER BY m.created_at,m.rowid`,
+              me.residenceId,
+              ...ids,
+            ),
+          ),
     ])
-    return { task: found, items, comments }
+    return found.map((row): CleaningTaskDetail => ({
+      task: row,
+      items: ofTask(items, row.id).map((item) => ({
+        ...item,
+        issue_status: item.issue_status as IssueStatus | null,
+      })),
+      comments: ofTask(comments, row.id),
+      supplies: ofTask(supplies, row.id),
+    }))
   })
 
-  const create = Effect.fn('Cleaning.create')(function* (input: {
-    readonly lot_ids: readonly string[]
-    readonly agent_id: string
-    readonly day: string
-    readonly priority?: Priority
-    readonly template_id: string
-    readonly note: string
-    readonly items?: readonly CleaningPoint[]
-  }) {
+  const task = Effect.fn('Cleaning.task')(function* (id: string) {
+    const me = yield* CurrentUser
+    const [detail] = yield* details(me, [yield* findTask(id)])
+    return detail!
+  })
+
+  const agentDay = Effect.fn('Cleaning.agentDay')(function* (date: string) {
+    const me = yield* CurrentUser
+    const rows = yield* db.all<TaskRow>(
+      sql(
+        `SELECT ${taskColumns} WHERE t.residence_id=? AND t.agent_id=? AND t.day=? AND t.status<>'cancelled'
+        ORDER BY t.status<>'planned',t.position IS NULL,t.position,arrival DESC,
+          CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,${targetOrder},t.id`,
+        me.residenceId,
+        me.id,
+        date,
+      ),
+    )
+    return { day: date, tasks: yield* details(me, rows.map(taskOf)) }
+  })
+
+  const create = Effect.fn('Cleaning.create')(function* (input: typeof CleaningTaskCreate.Type) {
     const me = yield* manager
-    const lots = [...new Set(input.lot_ids)]
+    const lots = [...new Set(input.lot_ids)],
+      places = [...new Set(input.place_ids ?? [])]
+    if (!lots.length && !places.length)
+      return yield* new InvalidInput({ message: 'Choisissez au moins un lot ou un lieu.' })
+    if (input.repeat && (input.repeat.until < input.day || input.repeat.until > addDays(input.day, MAX_REPEAT_DAYS)))
+      return yield* new InvalidInput({
+        message: 'La répétition se termine après le premier jour et dans les trois mois.',
+      })
+    const days = repeatDays(input.day, input.repeat)
+    if (!days.length) return yield* new InvalidInput({ message: 'Aucun jour ne correspond à la répétition choisie.' })
+    if ((lots.length + places.length) * days.length > MAX_CREATED)
+      return yield* new InvalidInput({ message: `Trop de ménages en une fois : ${MAX_CREATED} au maximum.` })
     const all = yield* loadTemplates(me)
     const explicit = input.template_id && input.template_id !== 'none'
     if (explicit && !all.some((template) => template.id === input.template_id))
       return yield* new CleaningTemplateNotFound()
-    const fallback = all.find((template) => template.is_default)
-    const taken = yield* db.all<{ lot_id: string; number: string }>(
-      sql(
-        `SELECT t.lot_id,l.number FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id
-        WHERE t.residence_id=? AND t.day=? AND t.status<>'cancelled' AND t.lot_id IN (${placeholders(lots)})
-        ORDER BY l.number COLLATE NOCASE`,
-        me.residenceId,
-        input.day,
-        ...lots,
+    const [taken, labels] = yield* Effect.all([
+      db.all<{ lot_id: string | null; place_id: string | null; day: string }>(
+        sql(
+          `SELECT lot_id,place_id,day FROM cleaning_tasks WHERE residence_id=? AND status<>'cancelled' AND day BETWEEN ? AND ?`,
+          me.residenceId,
+          days[0]!,
+          days[days.length - 1]!,
+        ),
       ),
-    )
-    const free = lots.filter((lot) => !taken.some((row) => row.lot_id === lot))
+      db.all<{ id: string; label: string }>(
+        sql(
+          `SELECT id,number AS label FROM lots WHERE residence_id=? UNION ALL SELECT id,name AS label FROM places WHERE residence_id=?`,
+          me.residenceId,
+          me.residenceId,
+        ),
+      ),
+    ])
+    const targets = [
+      ...lots.map((id) => ({ lot: id as string | null, place: null as string | null, id })),
+      ...places.map((id) => ({ lot: null as string | null, place: id as string | null, id })),
+    ].flatMap((target) => days.map((date) => ({ ...target, day: date })))
+    const isTaken = (target: (typeof targets)[number]) =>
+      taken.some((row) => row.day === target.day && (row.lot_id ?? row.place_id) === target.id)
+    const free = targets.filter((target) => !isTaken(target))
+    const skipped = targets
+      .filter(isTaken)
+      .map((target) => {
+        const label = labels.find((row) => row.id === target.id)?.label ?? ''
+        return input.repeat ? label + ' le ' + shortDate(target.day) : label
+      })
+      .sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }))
     if (!free.length) return yield* new CleaningDayTaken()
     const createdAt = yield* now
     yield* write(
-      free.flatMap((lot) => {
+      free.flatMap((target) => {
+        const type = input.type ?? (target.place ? 'commons' : 'routine')
         const template =
           input.template_id === 'none'
             ? undefined
             : explicit
               ? all.find((item) => item.id === input.template_id)
-              : (all.find((item) => item.lot_ids.includes(lot)) ?? fallback)
+              : templateFor(all, type, target.lot)
         const id = crypto.randomUUID()
         return [
           sql(
-            `INSERT INTO cleaning_tasks(id,residence_id,lot_id,agent_id,day,template_name,note,priority,created_by,created_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO cleaning_tasks(id,residence_id,lot_id,place_id,type,agent_id,day,template_name,note,priority,created_by,created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
             id,
             me.residenceId,
-            lot,
+            target.lot,
+            target.place,
+            type,
             input.agent_id,
-            input.day,
+            target.day,
             template?.name ?? '',
             input.note,
             input.priority ?? 'normal',
@@ -401,7 +547,7 @@ const make = Effect.gen(function* () {
         ]
       }),
     )
-    return { created: free.length, skipped: taken.map((row) => row.number) }
+    return { created: free.length, skipped }
   })
 
   const movements = Effect.fn('Cleaning.movements')(function* (day: string) {
@@ -424,19 +570,20 @@ const make = Effect.gen(function* () {
 
   const update = Effect.fn('Cleaning.update')(function* (
     id: string,
-    input: { agent_id: string; day: string; note: string; priority?: Priority },
+    input: { agent_id: string; day: string; note: string; priority?: Priority; type?: CleaningType },
   ) {
     const me = yield* manager
     const before = yield* findTask(id)
     yield* planned(before)
     yield* write([
       sql(
-        'UPDATE cleaning_tasks SET agent_id=?,day=?,position=CASE WHEN day=? THEN position END,note=?,priority=? WHERE id=? AND residence_id=?',
+        'UPDATE cleaning_tasks SET agent_id=?,day=?,position=CASE WHEN day=? THEN position END,note=?,priority=?,type=? WHERE id=? AND residence_id=?',
         input.agent_id,
         input.day,
         input.day,
         input.note,
         input.priority ?? before.priority,
+        input.type ?? before.type,
         id,
         me.residenceId,
       ),
@@ -521,10 +668,7 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  const setStatus = Effect.fn('Cleaning.setStatus')(function* (
-    id: string,
-    input: { status: CleaningStatus; report: string },
-  ) {
+  const setStatus = Effect.fn('Cleaning.setStatus')(function* (id: string, input: typeof CleaningStatusInput.Type) {
     const me = yield* CurrentUser
     const found = yield* findTask(id)
     if (input.status === 'done') {
@@ -534,7 +678,7 @@ const make = Effect.gen(function* () {
           `UPDATE cleaning_tasks SET status='done',report=?,completed_at=?,completed_by=?,review=NULL,reviewed_at=NULL,reviewed_by=NULL
           WHERE id=? AND residence_id=? AND status='planned'`,
           input.report,
-          yield* now,
+          yield* stamp(input.at),
           me.id,
           id,
           me.residenceId,
@@ -557,11 +701,11 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  const comment = Effect.fn('Cleaning.comment')(function* (taskId: string, body: string) {
+  const comment = Effect.fn('Cleaning.comment')(function* (taskId: string, input: typeof CleaningCommentInput.Type) {
     const me = yield* CurrentUser
     const found = yield* findTask(taskId)
     if (found.status === 'cancelled') return yield* new CleaningCancelled()
-    yield* write([insertComment(me, taskId, 'note', body, yield* now)])
+    yield* write([insertComment(me, taskId, 'note', input.body, yield* stamp(input.at), input.id)])
     return { ok: true }
   })
 
@@ -635,7 +779,7 @@ const make = Effect.gen(function* () {
 
   const updateItem = Effect.fn('Cleaning.updateItem')(function* (
     itemId: string,
-    input: { state: CleaningItemState; note: string },
+    input: { state: CleaningItemState; note: string; at?: string },
   ) {
     const me = yield* CurrentUser
     yield* planned(yield* findItem(itemId))
@@ -645,7 +789,7 @@ const make = Effect.gen(function* () {
         input.state,
         input.state === 'issue' ? input.note : '',
         me.id,
-        yield* now,
+        yield* stamp(input.at),
         itemId,
         me.residenceId,
       ),
@@ -653,7 +797,7 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
-  const checkAll = Effect.fn('Cleaning.checkAll')(function* (taskId: string, kind: CleaningItemKind) {
+  const checkAll = Effect.fn('Cleaning.checkAll')(function* (taskId: string, kind: CleaningItemKind, at?: string) {
     const me = yield* CurrentUser
     yield* planned(yield* findTask(taskId))
     yield* write([
@@ -661,7 +805,7 @@ const make = Effect.gen(function* () {
         `UPDATE cleaning_task_items SET state='done',note='',updated_by=?,updated_at=?
         WHERE task_id=? AND residence_id=? AND kind=? AND state='todo'`,
         me.id,
-        yield* now,
+        yield* stamp(at),
         taskId,
         me.residenceId,
         kind,
@@ -708,6 +852,124 @@ const make = Effect.gen(function* () {
     return { ok: true }
   })
 
+  const readiness = Effect.fn('Cleaning.readiness')(function* (date: string) {
+    const me = yield* manager
+    const columns = `l.id AS lot_id,l.number,COALESCE(b.name,'') AS building_name,l.cleanliness,l.cleanliness_at,
+      (SELECT json_object('id',t.id,'day',t.day,'status',t.status,'review',t.review,'agent_name',a.name)
+        FROM cleaning_tasks t JOIN users a ON a.id=t.agent_id WHERE t.lot_id=l.id AND t.status<>'cancelled'
+        ORDER BY t.status<>'planned',CASE WHEN t.status='planned' THEN t.day END,t.day DESC LIMIT 1) AS task`
+    const lotJoins = `LEFT JOIN buildings b ON b.id=l.building_id AND b.residence_id=l.residence_id`
+    type Row = Omit<ReadinessLot, 'task'> & { task: string | null }
+    const of = (row: Row): ReadinessLot => ({
+      ...row,
+      task: row.task ? (JSON.parse(row.task) as ReadinessLot['task']) : null,
+    })
+    const [arrivals, prepare, counts] = yield* Effect.all([
+      db.all<Row>(
+        sql(
+          `SELECT ${columns},s.planned_start AS arrival FROM stays s JOIN lots l ON l.id=s.lot_id ${lotJoins}
+          WHERE s.residence_id=? AND s.cancelled=0 AND s.actual_start IS NULL AND l.archived=0 AND s.planned_start BETWEEN ? AND ?
+          ORDER BY s.planned_start,l.number COLLATE NOCASE,s.id LIMIT ?`,
+          me.residenceId,
+          date,
+          addDays(date, 1),
+          READINESS_LIMIT,
+        ),
+      ),
+      db.all<Row>(
+        sql(
+          `SELECT ${columns},(SELECT MIN(s.planned_start) FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0
+            AND s.actual_start IS NULL AND s.planned_start>=?) AS arrival FROM lots l ${lotJoins}
+          WHERE l.residence_id=? AND l.archived=0 AND l.cleanliness='dirty'
+            AND NOT EXISTS(SELECT 1 FROM stays s WHERE s.lot_id=l.id AND s.cancelled=0 AND s.actual_start IS NOT NULL AND s.actual_end IS NULL)
+          ORDER BY arrival IS NULL,arrival,l.cleanliness_at,l.number COLLATE NOCASE LIMIT ?`,
+          date,
+          me.residenceId,
+          READINESS_LIMIT,
+        ),
+      ),
+      db.all<{ cleanliness: Cleanliness; total: number }>(
+        sql(
+          `SELECT l.cleanliness,COUNT(*) AS total FROM lots l WHERE l.residence_id=? AND l.archived=0
+          AND (l.cleanliness='out_of_service' OR NOT ${occupiedLot}) GROUP BY l.cleanliness`,
+          me.residenceId,
+        ),
+      ),
+    ])
+    const count = (state: Cleanliness) => counts.find((row) => row.cleanliness === state)?.total ?? 0
+    return {
+      day: date,
+      arrivals: arrivals.map(of),
+      to_prepare: prepare.map(of),
+      counts: {
+        dirty: count('dirty'),
+        clean: count('clean'),
+        inspected: count('inspected'),
+        out_of_service: count('out_of_service'),
+      },
+    }
+  })
+
+  const setCleanliness = Effect.fn('Cleaning.setCleanliness')(function* (lotId: string, cleanliness: Cleanliness) {
+    const me = yield* manager
+    const lot = yield* db.first(
+      sql('SELECT id FROM lots WHERE id=? AND residence_id=? AND archived=0', lotId, me.residenceId),
+    )
+    if (!lot) return yield* new InvalidInput({ message: 'Lot archivé ou introuvable. Rechargez la page.' })
+    yield* write([
+      sql(
+        'UPDATE lots SET cleanliness=?,cleanliness_at=? WHERE id=? AND residence_id=?',
+        cleanliness,
+        yield* now,
+        lotId,
+        me.residenceId,
+      ),
+    ])
+    return { ok: true }
+  })
+
+  const createIssue = Effect.fn('Cleaning.createIssue')(function* (itemId: string) {
+    const me = yield* manager
+    const found = yield* findItem(itemId)
+    if (found.status === 'cancelled') return yield* new CleaningCancelled()
+    const item = yield* db.first<{ label: string; note: string; state: CleaningItemState; issue_id: string | null }>(
+      sql(
+        `SELECT i.label,i.note,i.state,s.id AS issue_id FROM cleaning_task_items i
+        LEFT JOIN issues s ON s.cleaning_item_id=i.id WHERE i.id=? AND i.residence_id=?`,
+        itemId,
+        me.residenceId,
+      ),
+    )
+    if (!item) return yield* new CleaningItemNotFound()
+    if (item.issue_id) return { id: item.issue_id }
+    if (item.state !== 'issue')
+      return yield* new InvalidInput({ message: 'Seul un point signalé peut devenir un signalement technique.' })
+    const issueId = crypto.randomUUID(),
+      at = yield* now
+    const reported = (yield* currentDay) < found.day ? yield* currentDay : found.day
+    const description = [item.note, `Ménage du ${shortDate(found.day)} · ${found.agent_name}`]
+      .filter(Boolean)
+      .join('\n')
+    yield* write([
+      sql(
+        `INSERT INTO issues(id,residence_id,title,description,reported_on,lot_id,place_id,priority,created_by,created_at,cleaning_item_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+        issueId,
+        me.residenceId,
+        item.label,
+        description,
+        reported,
+        found.lot_id,
+        found.place_id,
+        found.priority,
+        me.id,
+        at,
+        itemId,
+      ),
+    ])
+    return { id: issueId }
+  })
+
   return {
     options,
     templates,
@@ -720,6 +982,10 @@ const make = Effect.gen(function* () {
     create,
     movements,
     task,
+    day: agentDay,
+    readiness,
+    setCleanliness,
+    createIssue,
     update,
     bulk,
     order,

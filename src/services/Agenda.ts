@@ -100,9 +100,18 @@ const make = Effect.gen(function* () {
             ),
           ),
       hidden
-        ? db.all<{ id: string; lot_id: string; number: string; day: string; status: string; note: string }>(
+        ? db.all<{
+            id: string
+            lot_id: string | null
+            number: string | null
+            place: string | null
+            day: string
+            status: string
+            note: string
+          }>(
             sql(
-              `SELECT t.id,t.lot_id,l.number,t.day,t.status,t.note FROM cleaning_tasks t JOIN lots l ON l.id=t.lot_id
+              `SELECT t.id,t.lot_id,l.number,p.name AS place,t.day,t.status,t.note FROM cleaning_tasks t
+              LEFT JOIN lots l ON l.id=t.lot_id LEFT JOIN places p ON p.id=t.place_id
               WHERE t.residence_id=? AND t.agent_id=? AND t.status<>'cancelled' AND t.day BETWEEN ? AND ? ${restriction}`,
               me.residenceId,
               me.id,
@@ -158,14 +167,15 @@ const make = Effect.gen(function* () {
       events.push({
         id: task.id,
         kind: 'cleaning',
-        lotId: task.lot_id,
-        lotNumber: task.number,
+        lotId: task.lot_id ?? '',
+        lotNumber: task.number ?? '',
         date: task.day,
         time: '',
         duration: 0,
         status: task.status,
         resident: '',
         comment: task.note,
+        ...(task.place ? { place: task.place, title: task.place } : {}),
       })
     return sortEvents(events)
   })

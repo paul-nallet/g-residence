@@ -1371,6 +1371,7 @@ export function TechnicalIssues() {
                   <VStack gap={1}>
                     <Text>{dateLabel(row.reported_on)}</Text>
                     <Text type="supporting">{row.actor}</Text>
+                    {row.cleaning_task_id && <Link href={'#cleaning/' + row.cleaning_task_id}>Depuis un ménage</Link>}
                   </VStack>
                 ),
               },

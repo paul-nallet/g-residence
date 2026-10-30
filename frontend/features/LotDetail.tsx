@@ -16,6 +16,7 @@ import { call } from '../lib/api.ts'
 import { useHashParam } from '../lib/hashParams.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { LotCleaning } from './Cleaning.tsx'
+import { CleanlinessSelect, CleanlinessToken, hasCleanliness } from './readiness.tsx'
 import { OccupationsTable } from './OccupationsTable.tsx'
 import { LotEditor } from './Lots.tsx'
 import { InspectionEditor, NoticeEditor, StayActionEditor, StayEditor } from './StayEditors.tsx'
@@ -70,6 +71,10 @@ export function LotDetail({ id, me }: { id: string; me: Me }) {
             </VStack>
             <HStack gap={2} wrap="wrap">
               <StateToken state={lot.occupancy === 'planned' ? 'Entrée prévue' : lot.occupancy} />
+              {!lot.archived && !canEdit && hasCleanliness(lot) && <CleanlinessToken cleanliness={lot.cleanliness} />}
+              {!lot.archived && canEdit && hasCleanliness(lot) && (
+                <CleanlinessSelect lotId={lot.id} cleanliness={lot.cleanliness} saved={() => void result.refresh()} />
+              )}
               {!!lot.archived && <Token label="Archivé" color="gray" />}
               {canEdit && (
                 <>

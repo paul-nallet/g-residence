@@ -68,7 +68,8 @@ const workSuppliers = `(SELECT json_group_array(name) FROM (SELECT s.name FROM w
   WHERE ws.work_id=w.id ORDER BY s.name COLLATE NOCASE))`
 const statusOf = `CASE WHEN w.state='open' THEN CASE WHEN w.planned_start IS NULL THEN 'to_plan' ELSE 'planned' END ELSE w.state END`
 const issueColumns = `i.id,i.title,i.description,i.reported_on,i.status,i.priority,i.work_id,w.title AS work_title,u.name AS actor,
-  i.lot_id,l.number AS lot_number,l.archived AS lot_archived,i.place_id,p.name AS place_name,p.archived AS place_archived`
+  i.lot_id,l.number AS lot_number,l.archived AS lot_archived,i.place_id,p.name AS place_name,p.archived AS place_archived,
+  (SELECT task_id FROM cleaning_task_items WHERE id=i.cleaning_item_id) AS cleaning_task_id`
 const issueJoins = `FROM issues i JOIN users u ON u.id=i.created_by LEFT JOIN works w ON w.id=i.work_id
   LEFT JOIN lots l ON l.id=i.lot_id LEFT JOIN places p ON p.id=i.place_id`
 

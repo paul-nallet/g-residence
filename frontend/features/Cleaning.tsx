@@ -1,10 +1,11 @@
 import { type Priority, priorityLabels } from '../../src/domain/priority.ts'
 import { PriorityField, PriorityFilter, PriorityToken, type PriorityFilterValue } from './priority.tsx'
-import { type ClipboardEvent, useCallback, useRef, useState } from 'react'
+import { type ClipboardEvent, type ReactNode, useCallback, useRef, useState } from 'react'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
+import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { ClickableCard } from '@astryxdesign/core/ClickableCard'
@@ -15,6 +16,7 @@ import { Link } from '@astryxdesign/core/Link'
 import { List, ListItem } from '@astryxdesign/core/List'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { MultiSelector } from '@astryxdesign/core/MultiSelector'
+import { NumberInput } from '@astryxdesign/core/NumberInput'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector } from '@astryxdesign/core/Selector'
@@ -37,16 +39,19 @@ import { Token } from '@astryxdesign/core/Token'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { Check, ChevronLeft, ChevronRight, MessageSquareText, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react'
-import type {
-  CleaningComment,
-  CleaningCommentKind,
-  CleaningItem,
-  CleaningItemKind,
-  CleaningItemState,
-  CleaningOptions,
-  CleaningReviewFilter,
-  CleaningTask,
-  CleaningTemplate,
+import {
+  type CleaningComment,
+  type CleaningCommentKind,
+  type CleaningItem,
+  type CleaningItemKind,
+  type CleaningItemState,
+  type CleaningOptions,
+  type CleaningReviewFilter,
+  type CleaningTask,
+  type CleaningTemplate,
+  CleaningType,
+  isoWeekday,
+  templateFor,
 } from '../../src/domain/cleaning.ts'
 import type { Me } from '../../src/domain/accounts.ts'
 import { addDays, monday, today } from '../../src/domain/rules.ts'
@@ -55,9 +60,22 @@ import { PageLayout } from '../app/PageLayout.tsx'
 import { call, messageOf } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
 import { useHashParam } from '../lib/hashParams.ts'
+import { enqueue, useCleaningDay, useCleaningTask, useOutbox } from '../lib/cleaningOffline.ts'
 import { checkForChanges } from '../lib/sync.ts'
 import { useMobile } from '../lib/useMobile.ts'
 import { DateField, dateLabel, Editor, Feedback, Loading, PeriodNav, roleLabels, StateToken } from './shared.tsx'
+import {
+  ArrivalToken,
+  cleaningTypeLabels,
+  CleaningTypeToken,
+  cleaningTypeOptions,
+  cleanlinessLabels,
+  CleanlinessToken,
+  OfflineStatus,
+  ReadinessPanel,
+  readinessCount,
+  taskTarget,
+} from './readiness.tsx'
 
 const kinds = ['task', 'check'] as const
 const kindTitles: Record<CleaningItemKind, string> = { task: 'À faire', check: 'À vérifier' }
@@ -80,7 +98,8 @@ const timeLabel = (instant: string) =>
   }).format(new Date(instant))
 const lotLabel = (lot: { number: string; building_name: string }) =>
   'Lot ' + lot.number + (lot.building_name ? ' · ' + lot.building_name : '')
-const taskLot = (task: CleaningTask) => lotLabel({ number: task.lot_number, building_name: task.building_name })
+const taskLot = taskTarget
+const shortTarget = (task: CleaningTask) => (task.lot_id ? 'Lot ' + task.lot_number : task.place_name)
 const plural = (count: number, one: string, many: string) => count + ' ' + (count > 1 ? many : one)
 const pointsSummary = (items: readonly { kind: CleaningItemKind }[]) => {
   const tasks = items.filter((item) => item.kind === 'task').length
@@ -300,11 +319,22 @@ function Lines({ text }: { text: string }) {
   )
 }
 
+const weekdays = [
+  { value: 1, short: 'L', label: 'Lundi' },
+  { value: 2, short: 'M', label: 'Mardi' },
+  { value: 3, short: 'M', label: 'Mercredi' },
+  { value: 4, short: 'J', label: 'Jeudi' },
+  { value: 5, short: 'V', label: 'Vendredi' },
+  { value: 6, short: 'S', label: 'Samedi' },
+  { value: 7, short: 'D', label: 'Dimanche' },
+]
+
 function PlanEditor({
   options,
   day,
   agentId = '',
   lotIds = [],
+  type: initialType,
   close,
   saved,
 }: {
@@ -312,12 +342,25 @@ function PlanEditor({
   day: string
   agentId?: string
   lotIds?: readonly string[]
+  type?: CleaningType
   close: () => void
   saved: (created: number, skipped: readonly string[]) => void
 }) {
+  const lotOf = (id: string) => options.lots.find((lot) => lot.id === id)
   const [lots, setLots] = useState<string[]>([...lotIds]),
+    [places, setPlaces] = useState<string[]>([]),
+    [type, setType] = useState<CleaningType>(
+      () =>
+        initialType ??
+        (lotIds.length && lotIds.every((id) => lotOf(id)?.cleanliness === 'dirty' && !lotOf(id)?.occupied)
+          ? 'departure'
+          : 'routine'),
+    ),
     [agent, setAgent] = useState(() => defaultAgent(options.agents, agentId, rememberedAgent())),
     [date, setDate] = useState(day),
+    [repeat, setRepeat] = useState(false),
+    [repeatDays, setRepeatDays] = useState<number[]>(() => (day ? [isoWeekday(day)] : [])),
+    [until, setUntil] = useState(() => (day ? addDays(day, 27) : '')),
     [template, setTemplate] = useState(''),
     [priority, setPriority] = useState<Priority>('normal'),
     [note, setNote] = useState(''),
@@ -331,47 +374,68 @@ function PlanEditor({
   )
   const planned = useQuery(date ? 'cleaning-day:' + date : '', loadDay)
   const active = new Set(options.lots.map((lot) => lot.id))
-  const taken = new Set((planned.data ?? []).filter((task) => task.status !== 'cancelled').map((task) => task.lot_id))
-  const free = lots.filter((id) => !taken.has(id))
-  const blocked = lots.filter((id) => taken.has(id))
-  const lotOf = (id: string) => options.lots.find((lot) => lot.id === id)
-  const fallback = options.templates.find((item) => item.is_default)
-  const templateFor = (lotId: string) =>
+  const taken = new Set(
+    (planned.data ?? [])
+      .filter((task) => task.status !== 'cancelled')
+      .map((task) => task.lot_id ?? task.place_id ?? ''),
+  )
+  const free = repeat ? lots : lots.filter((id) => !taken.has(id)),
+    freePlaces = repeat ? places : places.filter((id) => !taken.has(id))
+  const blocked = repeat ? [] : [...lots, ...places].filter((id) => taken.has(id))
+  const placeOf = (id: string) => options.places.find((place) => place.id === id)
+  const resolved = (lotId: string | null) =>
     template === 'none'
       ? undefined
-      : options.templates.find((item) => item.id === (template || lotOf(lotId)?.template_id || fallback?.id || ''))
-  const groups = [...new Set(free.map((id) => templateFor(id)?.id ?? ''))].map((id) => ({
+      : template
+        ? options.templates.find((item) => item.id === template)
+        : templateFor(options.templates, type, lotId)
+  const targets = [
+    ...free.map((id) => ({ id, label: 'Lot ' + (lotOf(id)?.number ?? '?'), template: resolved(id) })),
+    ...freePlaces.map((id) => ({ id, label: placeOf(id)?.name ?? '?', template: resolved(null) })),
+  ]
+  const groups = [...new Set(targets.map((target) => target.template?.id ?? ''))].map((id) => ({
     template: options.templates.find((item) => item.id === id),
-    lots: free.filter((lot) => (templateFor(lot)?.id ?? '') === id),
+    labels: targets.filter((target) => (target.template?.id ?? '') === id).map((target) => target.label),
   }))
-  const numbers = (ids: readonly string[]) => ids.map((id) => lotOf(id)?.number ?? '?').join(', ')
+  const names = (ids: readonly string[]) =>
+    ids.map((id) => (lotOf(id) ? 'lot ' + lotOf(id)!.number : (placeOf(id)?.name ?? '?'))).join(', ')
   const add = (ids: readonly string[]) =>
     setLots((current) => [...new Set([...current, ...ids.filter((id) => active.has(id))])])
   const departures = (movements.data?.departures ?? []).filter((id) => active.has(id)),
     arrivals = (movements.data?.arrivals ?? []).filter((id) => active.has(id)),
+    dirty = options.lots.filter((lot) => lot.cleanliness === 'dirty' && !lot.occupied).map((lot) => lot.id),
     buildings = [...new Set(options.lots.map((lot) => lot.building_name).filter(Boolean))]
+  const occurrences = repeat
+    ? Array.from({ length: 92 }, (_, index) => addDays(date || today(), index)).filter(
+        (current) => current <= until && repeatDays.includes(isoWeekday(current)),
+      ).length
+    : 1
+  const count = targets.length * occurrences
   const extra = pointsOf(rows)
   return (
     <Editor
       title="Planifier un ménage"
       width={760}
-      label={free.length > 1 ? 'Planifier ' + free.length + ' lots' : 'Planifier'}
+      label={count > 1 ? 'Planifier ' + count + ' ménages' : 'Planifier'}
       close={close}
       busy={mutation.busy}
       error={mutation.error}
-      disabled={!free.length || !agent || !date}
+      disabled={!count || !agent || !date || (repeat && !until)}
       submit={() =>
         void mutation.run(async () => {
           const result = await call((client) =>
             client.cleaning.create({
               payload: {
+                type,
                 lot_ids: free,
+                place_ids: freePlaces,
                 agent_id: agent,
                 day: date,
                 template_id: template,
                 note,
                 priority,
                 items: extra,
+                ...(repeat ? { repeat: { weekdays: repeatDays, until } } : {}),
               },
             }),
           )
@@ -380,9 +444,22 @@ function PlanEditor({
         })
       }
     >
+      <Selector
+        label="Type de ménage"
+        value={type}
+        onChange={(value) => setType(CleaningType.literals.find((item) => item === value) ?? 'routine')}
+        options={cleaningTypeOptions}
+        presentation="adaptive"
+      />
       <VStack gap={3}>
         <Heading level={3}>Lots</Heading>
         <HStack gap={2} wrap="wrap">
+          <Button
+            size="sm"
+            label={'Lots sales (' + dirty.length + ')'}
+            isDisabled={!dirty.length}
+            onClick={() => add(dirty)}
+          />
           <Button
             size="sm"
             label={'Sorties du jour (' + departures.length + ')'}
@@ -410,7 +487,11 @@ function PlanEditor({
         <MultiSelector
           label="Lots"
           isLabelHidden
-          options={options.lots.map((lot) => ({ value: lot.id, label: lotLabel(lot) }))}
+          options={options.lots.map((lot) => ({
+            value: lot.id,
+            label: lotLabel(lot),
+            description: lot.occupied ? 'Occupé' : cleanlinessLabels[lot.cleanliness],
+          }))}
           value={lots}
           onChange={setLots}
           hasSearch
@@ -420,11 +501,30 @@ function PlanEditor({
           emptySearchText="Aucun lot trouvé."
           triggerDisplay="badges"
         />
+        {options.places.length > 0 && (
+          <MultiSelector
+            label="Parties communes"
+            description="Lieux gérés dans Technique : laverie, couloirs, cuisine partagée…"
+            isOptional
+            options={options.places.map((place) => ({
+              value: place.id,
+              label: place.name + (place.building_name ? ' · ' + place.building_name : ''),
+            }))}
+            value={places}
+            onChange={setPlaces}
+            hasSearch
+            searchPlaceholder="Rechercher un lieu"
+            placeholder="Aucun lieu choisi"
+            emptyText="Aucun lieu actif."
+            emptySearchText="Aucun lieu trouvé."
+            triggerDisplay="badges"
+          />
+        )}
         {blocked.length > 0 && (
           <Banner
             status="warning"
-            title={plural(blocked.length, 'lot déjà planifié', 'lots déjà planifiés') + ' ce jour'}
-            description={'Lots ' + numbers(blocked) + ' : ils seront ignorés.'}
+            title={plural(blocked.length, 'ménage déjà prévu', 'ménages déjà prévus') + ' ce jour'}
+            description={'Ignorés : ' + names(blocked) + '.'}
           />
         )}
       </VStack>
@@ -432,19 +532,47 @@ function PlanEditor({
         <Heading level={3}>Qui et quand</Heading>
         <AgentField agents={options.agents} value={agent} onChange={setAgent} />
         <HStack gap={3} wrap="wrap">
-          <DateField label="Jour" value={date} onChange={setDate} />
+          <DateField label={repeat ? 'À partir du' : 'Jour'} value={date} onChange={setDate} />
           <PriorityField value={priority} onChange={setPriority} />
         </HStack>
+        <CheckboxInput
+          label="Répéter chaque semaine"
+          description="Crée dès maintenant un ménage par jour choisi, jusqu’à la date de fin (trois mois au plus)."
+          value={repeat}
+          onChange={setRepeat}
+        />
+        {repeat && (
+          <HStack gap={3} wrap="wrap" vAlign="end">
+            <HStack gap={1} wrap="wrap">
+              {weekdays.map((weekday) => (
+                <ToggleButton
+                  key={weekday.value}
+                  label={weekday.label}
+                  isPressed={repeatDays.includes(weekday.value)}
+                  onPressedChange={(pressed) =>
+                    setRepeatDays((current) =>
+                      pressed ? [...current, weekday.value].sort() : current.filter((value) => value !== weekday.value),
+                    )
+                  }
+                >
+                  {weekday.short}
+                </ToggleButton>
+              ))}
+            </HStack>
+            <DateField label="Jusqu’au" value={until} onChange={setUntil} />
+            <Text color="secondary">{plural(occurrences, 'jour', 'jours')}</Text>
+          </HStack>
+        )}
       </VStack>
       <VStack gap={3}>
         <Heading level={3}>Checklist</Heading>
         <Selector
           label="Fiche de ménage"
-          value={template || 'lot'}
-          onChange={(value) => setTemplate(value === 'lot' ? '' : value)}
+          value={template || 'auto'}
+          onChange={(value) => setTemplate(value === 'auto' ? '' : value)}
           presentation="adaptive"
           options={[
-            { value: 'lot', label: 'Fiche habituelle de chaque lot' },
+            { value: 'auto', label: 'Fiche habituelle (type de ménage, puis lot)' },
             ...options.templates.map((item) => ({ value: item.id, label: item.name })),
             { value: 'none', label: 'Aucune fiche : uniquement les points saisis ici' },
           ]}
@@ -457,7 +585,7 @@ function PlanEditor({
               header={
                 <VStack gap={0}>
                   <Text weight="semibold">{group.template ? group.template.name : 'Sans fiche'}</Text>
-                  <Text type="supporting">{'Lots ' + numbers(group.lots)}</Text>
+                  <Text type="supporting">{group.labels.join(', ')}</Text>
                 </VStack>
               }
             >
@@ -481,7 +609,7 @@ function PlanEditor({
           setRows={setRows}
           description={
             template === 'none'
-              ? 'Ce que l’agent coche dans chaque lot.'
+              ? 'Ce que l’agent coche à chaque ménage.'
               : 'Points en plus de la fiche, pour ce ménage uniquement : la fiche n’est pas modifiée.'
           }
         />
@@ -602,7 +730,7 @@ function BulkEditor({
       <Text color="secondary">
         {tasks
           .slice(0, 12)
-          .map((task) => 'Lot ' + task.lot_number + ' (' + dateLabel(task.day) + ')')
+          .map((task) => shortTarget(task) + ' (' + dateLabel(task.day) + ')')
           .join(', ') + (tasks.length > 12 ? '…' : '')}
       </Text>
       {mode === 'agent' && <AgentField agents={options.agents} value={agent} onChange={setAgent} />}
@@ -781,6 +909,7 @@ function DayTable({
               endContent={
                 <VStack gap={1} hAlign="end">
                   <StateToken state={task.status} />
+                  <ArrivalToken task={task} />
                   <ReviewToken task={task} />
                   {task.priority !== 'normal' && <PriorityToken priority={task.priority} />}
                 </VStack>
@@ -800,9 +929,13 @@ function DayTable({
               header: 'Lot',
               width: proportional(2, { minWidth: 140 }),
               renderCell: (task) => (
-                <VStack gap={0}>
+                <VStack gap={1}>
                   <Link href={'#cleaning/' + task.id}>{rank(task) + taskLot(task)}</Link>
-                  <Text type="supporting">{task.template_name || 'Sans fiche'}</Text>
+                  <HStack gap={1} vAlign="center" wrap="wrap">
+                    <Text type="supporting">{task.template_name || 'Sans fiche'}</Text>
+                    <CleaningTypeToken type={task.type} />
+                    <ArrivalToken task={task} />
+                  </HStack>
                 </VStack>
               ),
             },
@@ -944,7 +1077,7 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
 
 const plannedMessage = (created: number, skipped: readonly string[]) =>
   plural(created, 'tâche planifiée', 'tâches planifiées') +
-  (skipped.length ? ' ; déjà planifiés ce jour, ignorés : lots ' + skipped.join(', ') : '') +
+  (skipped.length ? ' ; déjà prévus, ignorés : ' + skipped.join(', ') : '') +
   '.'
 const bulkMessage = (updated: number, skipped: number) =>
   plural(updated, 'tâche modifiée', 'tâches modifiées') +
@@ -955,9 +1088,9 @@ const bulkMessage = (updated: number, skipped: number) =>
 
 function MyDay({ me }: { me: Me }) {
   const [date, setDate] = useHashParam('date', today())
-  const load = useCallback(() => call((client) => client.cleaning.tasks({ query: { from: date, to: date } })), [date])
-  const result = useQuery(`cleaning:${date}:${date}:${me.id}:all`, load)
-  const tasks = result.data ?? []
+  const result = useCleaningDay(me.id, me.name, date)
+  const outbox = useOutbox(me.id)
+  const tasks = (result.data?.tasks ?? []).map((detail) => detail.task)
   const todo = tasks.filter((task) => task.status === 'planned'),
     done = tasks.filter((task) => task.status === 'done')
   return (
@@ -981,6 +1114,7 @@ function MyDay({ me }: { me: Me }) {
         />
         <Text weight="semibold">{dayLabel(date)}</Text>
       </HStack>
+      <OfflineStatus userId={me.id} outbox={outbox} savedAt={result.savedAt} />
       {!result.data ? (
         <Loading error={result.error} retry={() => void result.refresh()} />
       ) : !todo.length && !done.length ? (
@@ -1009,6 +1143,8 @@ function MyDay({ me }: { me: Me }) {
                     <HStack gap={2} vAlign="center" wrap="wrap">
                       <Heading level={2}>{index + 1 + '. ' + taskLot(task)}</Heading>
                       {index === 0 && <Token label="Prochain lot" color="blue" size="sm" />}
+                      <ArrivalToken task={task} />
+                      <CleaningTypeToken type={task.type} />
                       <ReviewToken task={task} />
                       {task.priority !== 'normal' && <PriorityToken priority={task.priority} />}
                     </HStack>
@@ -1066,7 +1202,7 @@ function Planning() {
     [priority, setPriority] = useState<PriorityFilterValue>('all'),
     [review, setReview] = useHashParam<CleaningReviewFilter | 'all'>('verification', 'all'),
     [view, setView] = useHashParam('vue', mobile ? 'day' : 'week'),
-    [planning, setPlanning] = useState(false),
+    [planning, setPlanning] = useState<{ lotIds: readonly string[]; type?: CleaningType } | null>(null),
     [selected, setSelected] = useState<ReadonlySet<string>>(new Set()),
     [bulk, setBulk] = useState<BulkMode | null>(null),
     [cancelling, setCancelling] = useState(false),
@@ -1093,6 +1229,12 @@ function Planning() {
   )
   const result = useQuery(`cleaning:${from}:${to}:${agent}:${priority}:${review}`, load)
   const options = useQuery<CleaningOptions | null>('cleaning-options', loadOptions)
+  const readyDay = week ? today() : date
+  const loadReadiness = useCallback(
+    () => call((client) => client.cleaning.readiness({ query: { day: readyDay } })),
+    [readyDay],
+  )
+  const readiness = useQuery('cleaning-readiness:' + readyDay, loadReadiness)
   const mutation = useMutation()
   const tasks = result.data ?? []
   const active = tasks.filter((task) => task.status !== 'cancelled')
@@ -1150,7 +1292,7 @@ function Planning() {
             label="Planifier un ménage"
             variant="primary"
             isDisabled={!options.data}
-            onClick={() => setPlanning(true)}
+            onClick={() => setPlanning({ lotIds: [] })}
           />
         </HStack>
       }
@@ -1324,6 +1466,25 @@ function Planning() {
         />
       )}
       <Feedback success={success} error={options.error} />
+      {readiness.data && (
+        <Collapsible
+          defaultIsOpen={readinessCount(readiness.data) > 0}
+          chevronPosition="start"
+          trigger={
+            <HStack gap={2} vAlign="center">
+              <Heading level={2}>Préparation des lots</Heading>
+              {readinessCount(readiness.data) > 0 && (
+                <Badge variant="warning" label={readinessCount(readiness.data) + ' à planifier'} />
+              )}
+            </HStack>
+          }
+        >
+          <ReadinessPanel
+            readiness={readiness.data}
+            plan={options.data ? (lotIds) => setPlanning({ lotIds, type: 'departure' }) : undefined}
+          />
+        </Collapsible>
+      )}
       {!result.data ? (
         <Loading error={result.error} retry={() => void result.refresh()} />
       ) : days.length ? (
@@ -1398,13 +1559,16 @@ function Planning() {
       {planning && options.data && (
         <PlanEditor
           options={options.data}
-          day={date}
+          day={planning.lotIds.length && week ? today() : date}
           agentId={agent}
-          close={() => setPlanning(false)}
+          lotIds={planning.lotIds}
+          type={planning.type}
+          close={() => setPlanning(null)}
           saved={(created, skipped) => {
-            setPlanning(false)
+            setPlanning(null)
             setSuccess(plannedMessage(created, skipped))
             void result.refresh()
+            void readiness.refresh()
           }}
         />
       )}
@@ -1424,6 +1588,7 @@ function TaskEditor({
   saved: () => void
 }) {
   const [agent, setAgent] = useState(task.agent_id),
+    [type, setType] = useState<CleaningType>(task.type),
     [day, setDay] = useState(task.day),
     [note, setNote] = useState(task.note),
     [priority, setPriority] = useState<Priority>(task.priority)
@@ -1439,12 +1604,22 @@ function TaskEditor({
         void mutation.run(
           () =>
             call((client) =>
-              client.cleaning.update({ params: { id: task.id }, payload: { agent_id: agent, day, note, priority } }),
+              client.cleaning.update({
+                params: { id: task.id },
+                payload: { agent_id: agent, day, note, priority, type },
+              }),
             ),
           saved,
         )
       }
     >
+      <Selector
+        label="Type de ménage"
+        value={type}
+        onChange={(value) => setType(CleaningType.literals.find((item) => item === value) ?? task.type)}
+        options={cleaningTypeOptions}
+        presentation="adaptive"
+      />
       <AgentField agents={options.agents} value={agent} onChange={setAgent} />
       <DateField label="Jour" value={day} onChange={setDay} />
       <PriorityField value={priority} onChange={setPriority} />
@@ -1532,7 +1707,17 @@ function SaveAsTemplate({
   )
 }
 
-function IssueEditor({ item, close, saved }: { item: CleaningItem; close: () => void; saved: () => void }) {
+function IssueEditor({
+  item,
+  close,
+  saved,
+  save,
+}: {
+  item: CleaningItem
+  close: () => void
+  saved: () => void
+  save?: (note: string) => void
+}) {
   const [note, setNote] = useState(item.state === 'issue' ? item.note : '')
   const mutation = useMutation()
   const title = item.kind === 'task' ? 'Non fait' : 'Anomalie'
@@ -1544,10 +1729,13 @@ function IssueEditor({ item, close, saved }: { item: CleaningItem; close: () => 
       busy={mutation.busy}
       error={mutation.error}
       submit={() =>
-        void mutation.run(
-          () => call((client) => client.cleaning.item({ params: { id: item.id }, payload: { state: 'issue', note } })),
-          saved,
-        )
+        save
+          ? (save(note), saved())
+          : void mutation.run(
+              () =>
+                call((client) => client.cleaning.item({ params: { id: item.id }, payload: { state: 'issue', note } })),
+              saved,
+            )
       }
     >
       <TextArea
@@ -1568,28 +1756,34 @@ function FinishEditor({
   issues,
   close,
   saved,
+  save,
 }: {
   task: CleaningTask
   handled: number
   issues: number
   close: () => void
   saved: () => void
+  save?: (report: string) => void
 }) {
   const [report, setReport] = useState('')
   const mutation = useMutation()
   return (
     <Editor
-      title={'Terminer le ménage · Lot ' + task.lot_number}
+      title={'Terminer le ménage · ' + shortTarget(task)}
       label="Marquer comme terminé"
       close={close}
       busy={mutation.busy}
       error={mutation.error}
       submit={() =>
-        void mutation.run(
-          () =>
-            call((client) => client.cleaning.status({ params: { id: task.id }, payload: { status: 'done', report } })),
-          saved,
-        )
+        save
+          ? (save(report), saved())
+          : void mutation.run(
+              () =>
+                call((client) =>
+                  client.cleaning.status({ params: { id: task.id }, payload: { status: 'done', report } }),
+                ),
+              saved,
+            )
       }
     >
       <Text>
@@ -1607,22 +1801,34 @@ function FinishEditor({
   )
 }
 
-function CommentEditor({ task, close, saved }: { task: CleaningTask; close: () => void; saved: () => void }) {
+function CommentEditor({
+  task,
+  close,
+  saved,
+  save,
+}: {
+  task: CleaningTask
+  close: () => void
+  saved: () => void
+  save?: (body: string) => void
+}) {
   const [body, setBody] = useState('')
   const mutation = useMutation()
   return (
     <Editor
-      title={'Commenter le ménage du lot ' + task.lot_number}
+      title={'Commenter le ménage · ' + shortTarget(task)}
       label="Ajouter"
       close={close}
       busy={mutation.busy}
       error={mutation.error}
       disabled={!body.trim()}
       submit={() =>
-        void mutation.run(
-          () => call((client) => client.cleaning.comment({ params: { id: task.id }, payload: { body } })),
-          saved,
-        )
+        save
+          ? (save(body.trim()), saved())
+          : void mutation.run(
+              () => call((client) => client.cleaning.comment({ params: { id: task.id }, payload: { body } })),
+              saved,
+            )
       }
     >
       <Text color="secondary">Visible par l’équipe. La checklist et le statut ne changent pas.</Text>
@@ -1756,6 +1962,7 @@ function Checklist({
   setState,
   report,
   checkAll,
+  renderAction,
 }: {
   kind: CleaningItemKind
   items: readonly CleaningItem[]
@@ -1763,6 +1970,7 @@ function Checklist({
   setState: (item: CleaningItem, state: CleaningItemState) => void
   report: (item: CleaningItem) => void
   checkAll: (kind: CleaningItemKind) => void
+  renderAction?: (item: CleaningItem) => ReactNode
 }) {
   const mobile = useMobile()
   const list = items.filter((item) => item.kind === kind)
@@ -1801,6 +2009,7 @@ function Checklist({
           endContent={
             editable ? (
               <HStack gap={1} vAlign="center">
+                {renderAction?.(item)}
                 <ToggleButton
                   label={stateLabels[kind].done + ' : ' + item.label}
                   isIconOnly={mobile}
@@ -1823,11 +2032,14 @@ function Checklist({
                 </ToggleButton>
               </HStack>
             ) : (
-              <Token
-                label={stateLabels[kind][item.state]}
-                color={item.state === 'issue' ? 'orange' : item.state === 'done' ? 'green' : 'default'}
-                size="sm"
-              />
+              <HStack gap={1} vAlign="center">
+                {renderAction?.(item)}
+                <Token
+                  label={stateLabels[kind][item.state]}
+                  color={item.state === 'issue' ? 'orange' : item.state === 'done' ? 'green' : 'default'}
+                  size="sm"
+                />
+              </HStack>
             )
           }
         />
@@ -1836,29 +2048,117 @@ function Checklist({
   )
 }
 
+function SupplyEditor({
+  task,
+  comment: initialComment,
+  close,
+  saved,
+}: {
+  task: CleaningTask
+  comment: string
+  close: () => void
+  saved: () => void
+}) {
+  const [search, setSearch] = useState(''),
+    [itemId, setItemId] = useState(''),
+    [quantity, setQuantity] = useState(1),
+    [comment, setComment] = useState(
+      shortTarget(task) + ' · ménage du ' + dateLabel(task.day) + (initialComment ? ' · ' + initialComment : ''),
+    )
+  const query = search.trim()
+  const load = useCallback(() => call((client) => client.stock.list({ query: query ? { q: query } : {} })), [query])
+  const stock = useQuery('cleaning-supply:' + query, load)
+  const mutation = useMutation()
+  const chosen = stock.data?.items.find((item) => item.id === itemId)
+  const day = task.day > today() ? today() : task.day
+  return (
+    <Editor
+      title={'Sortie de stock · ' + shortTarget(task)}
+      label="Enregistrer la sortie"
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error || stock.error}
+      disabled={!itemId || quantity < 1 || (chosen ? quantity > chosen.quantity : false)}
+      submit={() =>
+        void mutation.run(
+          () =>
+            call((client) =>
+              client.stock.move({
+                params: { id: itemId },
+                payload: { kind: 'out', quantity, occurred_on: day, comment, cleaning_task_id: task.id },
+              }),
+            ),
+          saved,
+        )
+      }
+    >
+      <TextInput
+        label="Rechercher un article"
+        value={search}
+        onChange={setSearch}
+        isOptional
+        hasAutoFocus
+        placeholder="Papier toilette, éponge…"
+      />
+      <Selector
+        label="Article"
+        value={itemId}
+        onChange={setItemId}
+        placeholder={stock.data?.items.length ? 'Choisir un article' : 'Aucun article trouvé'}
+        presentation="adaptive"
+        options={(stock.data?.items ?? []).map((item) => ({
+          value: item.id,
+          label: item.name,
+          description: 'En stock : ' + item.quantity + (item.unit ? ' ' + item.unit : ''),
+        }))}
+      />
+      <NumberInput
+        label="Quantité sortie"
+        value={quantity}
+        onChange={(value) => setQuantity(value ?? 0)}
+        min={1}
+        max={1000000}
+        isIntegerOnly
+        hasNumberSteppers
+        units={chosen?.unit || null}
+      />
+      {chosen && quantity > chosen.quantity && (
+        <Feedback error={'Stock insuffisant : ' + chosen.quantity + ' disponible(s).'} />
+      )}
+      <TextInput label="Commentaire" value={comment} onChange={setComment} isOptional />
+      <Text color="secondary">Datée du {dateLabel(day)} et rattachée à ce ménage.</Text>
+    </Editor>
+  )
+}
+
 export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
   const manager = me.role !== 'cleaner',
     mobile = useMobile()
-  const load = useCallback(() => call((client) => client.cleaning.task({ params: { id } })), [id]),
-    detail = useQuery('cleaning-task:' + id, load),
-    options = useQuery<CleaningOptions | null>(manager ? 'cleaning-options' : '', manager ? loadOptions : noOptions)
+  const detail = useCleaningTask(me.id, me.name, id, manager),
+    options = useQuery<CleaningOptions | null>(manager ? 'cleaning-options' : '', manager ? loadOptions : noOptions),
+    outbox = useOutbox(me.id)
   const day = detail.data?.task.day ?? '',
     agentId = detail.data?.task.agent_id ?? ''
   const loadDay = useCallback(
-    () => call((client) => client.cleaning.tasks({ query: { from: day, to: day, agent: agentId } })),
-    [day, agentId],
+    () =>
+      manager && day
+        ? call((client) => client.cleaning.tasks({ query: { from: day, to: day, agent: agentId } }))
+        : Promise.resolve([]),
+    [manager, day, agentId],
   )
-  const sameDay = useQuery(day ? `cleaning:${day}:${day}:${agentId}:all` : '', loadDay)
+  const sameDay = useQuery(manager && day ? `cleaning:${day}:${day}:${agentId}:all` : '', loadDay)
+  const myDay = useCleaningDay(me.id, me.name, manager ? '' : day)
   const [dialog, setDialog] = useState<
-      'edit' | 'checklist' | 'template' | 'finish' | 'cancel' | 'comment' | 'approved' | 'revision' | null
+      'edit' | 'checklist' | 'template' | 'finish' | 'cancel' | 'comment' | 'approved' | 'revision' | 'supply' | null
     >(null),
     [issue, setIssue] = useState<CleaningItem | null>(null),
+    [supply, setSupply] = useState<{ comment: string } | null>(null),
     [overrides, setOverrides] = useState<Record<string, CleaningItemState>>({}),
     [failure, setFailure] = useState(''),
     [success, setSuccess] = useState('')
   const mutation = useMutation()
   const task = detail.data?.task
-  useDetailCrumb(task ? 'Lot ' + task.lot_number + ' · ' + dateLabel(task.day) : '')
+  useDetailCrumb(task ? shortTarget(task) + ' · ' + dateLabel(task.day) : '')
   if (!detail.data || !task)
     return (
       <PageLayout header={<Heading level={1}>Tâche de ménage</Heading>}>
@@ -1873,16 +2173,27 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
   const handled = items.filter((item) => item.state !== 'todo').length,
     issues = items.filter((item) => item.state === 'issue').length,
     remaining = items.length - handled
-  const next = (sameDay.data ?? []).find((other) => other.status === 'planned' && other.id !== task.id)
+  const next = (manager ? (sameDay.data ?? []) : (myDay.data?.tasks ?? []).map((other) => other.task)).find(
+    (other) => other.status === 'planned' && other.id !== task.id,
+  )
   const refreshed = (message: string) => {
     setDialog(null)
     setIssue(null)
     setSuccess(message)
+    if (!manager) return
     void detail.refresh()
     void sameDay.refresh()
   }
   const run = (action: () => Promise<unknown>, message: string) => void mutation.run(action, () => refreshed(message))
+  const queue = manager
+    ? undefined
+    : (op: Parameters<typeof enqueue>[1]) => {
+        setFailure('')
+        setSuccess('')
+        enqueue(me.id, op)
+      }
   const setState = (item: CleaningItem, state: CleaningItemState) => {
+    if (queue) return queue({ kind: 'item', taskId: id, itemId: item.id, state, note: '' })
     setOverrides((current) => ({ ...current, [item.id]: state }))
     setFailure('')
     setSuccess('')
@@ -1956,7 +2267,10 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
       ? [{ label: 'Rétablir', onClick: () => status('planned', 'Tâche rétablie.') }]
       : []),
     ...(manager && editable ? [{ label: 'Modifier la checklist', onClick: () => setDialog('checklist') }] : []),
-    { label: 'Voir le lot', href: '#lots/' + task.lot_id },
+    ...(task.lot_id ? [{ label: 'Voir le lot', href: '#lots/' + task.lot_id }] : []),
+    ...(manager && task.status !== 'cancelled'
+      ? [{ label: 'Sortie de stock', onClick: () => setSupply({ comment: '' }) }]
+      : []),
     ...(manager && editable ? [{ label: 'Modifier la tâche', onClick: () => setDialog('edit') }] : []),
     ...(manager && items.length ? [{ label: 'Enregistrer comme fiche', onClick: () => setDialog('template') }] : []),
     ...(manager && editable
@@ -1977,6 +2291,9 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
               <StateToken state={task.status} />
               <ReviewToken task={task} />
               <PriorityToken priority={task.priority} />
+              <CleaningTypeToken type={task.type} />
+              <ArrivalToken task={task} />
+              {manager && task.cleanliness && <CleanlinessToken cleanliness={task.cleanliness} />}
             </HStack>
             <Text>
               {dayLabel(task.day)} · {task.agent_name} · {task.template_name || 'Sans fiche'}
@@ -2024,7 +2341,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
                   onClick={() => setDialog('checklist')}
                 />
               )}
-              <Button label="Voir le lot" href={'#lots/' + task.lot_id} />
+              {task.lot_id && <Button label="Voir le lot" href={'#lots/' + task.lot_id} />}
               {manager && (
                 <MoreMenu
                   label="Gérer la tâche"
@@ -2033,6 +2350,9 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
                   isDisabled={mutation.busy || !options.data}
                   items={[
                     ...(editable ? [{ label: 'Modifier la tâche', onClick: () => setDialog('edit') }] : []),
+                    ...(task.status !== 'cancelled'
+                      ? [{ label: 'Sortie de stock', onClick: () => setSupply({ comment: '' }) }]
+                      : []),
                     ...(items.length
                       ? [{ label: 'Enregistrer comme fiche', onClick: () => setDialog('template') }]
                       : []),
@@ -2054,6 +2374,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
         </HStack>
       }
     >
+      {!manager && <OfflineStatus userId={me.id} outbox={outbox} savedAt={detail.savedAt} />}
       <Feedback error={failure || mutation.error} success={success} />
       {task.note && <Banner status="info" title="Consigne" description={<Lines text={task.note} />} />}
       {task.status === 'planned' && task.review === 'revision' && lastRevision && (
@@ -2102,13 +2423,78 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           setState={setState}
           report={setIssue}
           checkAll={(target) =>
-            run(() => call((client) => client.cleaning.checkAll({ params: { id }, payload: { kind: target } })), '')
+            queue
+              ? queue({ kind: 'checkAll', taskId: id, itemKind: target })
+              : run(() => call((client) => client.cleaning.checkAll({ params: { id }, payload: { kind: target } })), '')
+          }
+          renderAction={
+            manager
+              ? (item) =>
+                  item.issue_id ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      label={item.issue_status === 'open' ? 'Signalement ouvert' : 'Signalement traité'}
+                      href="#technical/signalements"
+                    />
+                  ) : item.state === 'issue' && task.status !== 'cancelled' ? (
+                    <MoreMenu
+                      label={'Suites pour ' + item.label}
+                      alignment="end"
+                      presentation="adaptive"
+                      isDisabled={mutation.busy}
+                      items={[
+                        {
+                          label: 'Créer un signalement technique',
+                          onClick: () =>
+                            run(
+                              () => call((client) => client.cleaning.createIssue({ params: { id: item.id } })),
+                              'Signalement créé : retrouvez-le dans Technique.',
+                            ),
+                        },
+                        {
+                          label: 'Sortie de stock',
+                          onClick: () => setSupply({ comment: item.label + (item.note ? ' : ' + item.note : '') }),
+                        },
+                      ]}
+                    />
+                  ) : null
+              : undefined
           }
         />
       ))}
+      {manager && detail.data.supplies.length > 0 && (
+        <List hasDividers header={<Heading level={2}>Sorties de stock</Heading>}>
+          {detail.data.supplies.map((entry) => (
+            <ListItem
+              key={entry.id}
+              label={entry.item_name}
+              href={'#stock/' + entry.item_id}
+              description={[dateLabel(entry.occurred_on), entry.actor, entry.comment].filter(Boolean).join(' · ')}
+              endContent={<Badge label={entry.quantity + (entry.unit ? ' ' + entry.unit : '')} />}
+            />
+          ))}
+        </List>
+      )}
       <CommentThread comments={detail.data.comments} add={commentable ? () => setDialog('comment') : undefined} />
       {dialog === 'comment' && (
-        <CommentEditor task={task} close={() => setDialog(null)} saved={() => refreshed('Commentaire ajouté.')} />
+        <CommentEditor
+          task={task}
+          close={() => setDialog(null)}
+          saved={() => refreshed('Commentaire ajouté.')}
+          save={queue && ((body) => queue({ kind: 'comment', taskId: id, body }))}
+        />
+      )}
+      {supply && (
+        <SupplyEditor
+          task={task}
+          comment={supply.comment}
+          close={() => setSupply(null)}
+          saved={() => {
+            setSupply(null)
+            refreshed('Sortie de stock enregistrée.')
+          }}
+        />
       )}
       {(dialog === 'approved' || dialog === 'revision') && (
         <ReviewEditor
@@ -2153,6 +2539,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           issues={issues}
           close={() => setDialog(null)}
           saved={() => refreshed('Ménage terminé.')}
+          save={queue && ((report) => queue({ kind: 'finish', taskId: id, report }))}
         />
       )}
       {dialog === 'cancel' && (
@@ -2161,7 +2548,7 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           onOpenChange={(open) => {
             if (!open && !mutation.busy) setDialog(null)
           }}
-          title={'Annuler le ménage du lot ' + task.lot_number + ' ?'}
+          title={'Annuler le ménage · ' + shortTarget(task) + ' ?'}
           description="La tâche reste visible comme annulée dans le planning et peut être rétablie."
           actionLabel="Annuler la tâche"
           cancelLabel="Garder"
@@ -2169,7 +2556,14 @@ export function CleaningTaskDetail({ id, me }: { id: string; me: Me }) {
           onAction={() => status('cancelled', 'Tâche annulée.')}
         />
       )}
-      {issue && <IssueEditor item={issue} close={() => setIssue(null)} saved={() => refreshed('')} />}
+      {issue && (
+        <IssueEditor
+          item={issue}
+          close={() => setIssue(null)}
+          saved={() => refreshed('')}
+          save={queue && ((note) => queue({ kind: 'item', taskId: id, itemId: issue.id, state: 'issue', note }))}
+        />
+      )}
     </PageLayout>
   )
 }
@@ -2190,6 +2584,7 @@ function TemplateEditor({
   const initial = template ?? source
   const [name, setName] = useState(template?.name ?? (source ? source.name + ' (copie)' : '')),
     [isDefault, setIsDefault] = useState(template?.is_default ?? !options.templates.some((item) => item.is_default)),
+    [defaultType, setDefaultType] = useState<CleaningType | ''>(template?.default_type ?? ''),
     [rows, setRows] = useState<Row[]>(() => rowsOf(initial?.items ?? [])),
     [lots, setLots] = useState<string[]>([...(template?.lot_ids ?? [])])
   const mutation = useMutation()
@@ -2208,6 +2603,7 @@ function TemplateEditor({
           const payload = {
             name,
             is_default: isDefault,
+            default_type: defaultType || null,
             items: pointsOf(rows).map(({ kind, label }) => ({ kind, label })),
             lot_ids: lots,
           }
@@ -2233,6 +2629,22 @@ function TemplateEditor({
         description="Appliquée à tous les lots qui n’ont pas de fiche spécifique."
         value={isDefault}
         onChange={setIsDefault}
+      />
+      <Selector
+        label="Fiche habituelle d’un type de ménage"
+        description="Prioritaire sur la fiche du lot quand ce type est planifié. Une seule fiche par type."
+        value={defaultType || 'none'}
+        onChange={(value) => setDefaultType(CleaningType.literals.find((item) => item === value) ?? '')}
+        options={[
+          { value: 'none', label: 'Aucun type' },
+          ...cleaningTypeOptions.map((option) => {
+            const other = options.templates.find(
+              (item) => item.id !== template?.id && item.default_type === option.value,
+            )
+            return { ...option, description: other ? 'Actuellement : ' + other.name : undefined }
+          }),
+        ]}
+        presentation="adaptive"
       />
       <ChecklistEditor rows={rows} setRows={setRows} />
       <MultiSelector
@@ -2315,11 +2727,12 @@ export function CleaningTemplates() {
                 const numbers = lotNumbers(row.lot_ids)
                 return (
                   <Text>
-                    {row.is_default
-                      ? 'Tous les lots sans fiche spécifique' + (numbers.length ? ' et ' + numbers.join(', ') : '')
-                      : numbers.length
-                        ? numbers.join(', ')
-                        : 'Aucun lot'}
+                    {(row.default_type ? 'Ménages « ' + cleaningTypeLabels[row.default_type] + ' » · ' : '') +
+                      (row.is_default
+                        ? 'Tous les lots sans fiche spécifique' + (numbers.length ? ' et ' + numbers.join(', ') : '')
+                        : numbers.length
+                          ? numbers.join(', ')
+                          : 'Aucun lot')}
                   </Text>
                 )
               },
@@ -2372,6 +2785,9 @@ export function CleaningTemplateDetail({ id }: { id: string }) {
             <HStack gap={2} vAlign="center">
               <Heading level={1}>{template.name}</Heading>
               {template.is_default && <Token label="Par défaut" color="blue" size="sm" />}
+              {template.default_type && (
+                <Token label={'Type : ' + cleaningTypeLabels[template.default_type]} color="purple" size="sm" />
+              )}
             </HStack>
             <Text>{pointsSummary(template.items)}</Text>
           </VStack>
