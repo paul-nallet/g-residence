@@ -162,6 +162,8 @@ Passerelles : depuis un point signalé, le gestionnaire crée un signalement tec
 
 Hors ligne : « Ma journée » et ses tâches restent consultables et utilisables sans réseau (sous-sols). L’agent coche, signale, commente et termine ; ses actions sont gardées sur l’appareil, envoyées dans l’ordre au retour du réseau avec leur heure réelle (bornée à sept jours et jamais dans le futur), sans doublon. Une action refusée au retour est montrée à l’agent, qui peut l’ignorer. La déconnexion efface les données gardées. Les pages des gestionnaires ne sont pas utilisables hors ligne. Lire `docs/decisions/0010-hors-ligne.md`.
 
+Application installable : GResidence s’installe sur l’écran d’accueil (Android, iOS, ordinateur) et s’ouvre en plein écran, avec raccourcis vers le ménage et le calendrier. Lire `docs/decisions/0011-pwa.md`.
+
 
 ## Technique : lieux, fournisseurs, signalements et travaux
 

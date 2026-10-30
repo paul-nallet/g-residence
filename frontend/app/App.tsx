@@ -46,6 +46,7 @@ import {
 import { Feedback, Loading, roleLabels } from '../features/status.tsx'
 import { call, SESSION_EXPIRED } from '../lib/api.ts'
 import { useMutation, useQuery } from '../lib/data.ts'
+import { install, useInstallPrompt } from '../lib/install.ts'
 import { forgetSession, loadSession } from '../lib/session.ts'
 import { CommandBar } from '../command/CommandBar.tsx'
 import { useMobile } from '../lib/useMobile.ts'
@@ -68,7 +69,8 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
     [isNavCollapsed, setIsNavCollapsed] = useState(false),
     [isStudioOpen, setIsStudioOpen] = useState(false),
     crumb = useCrumb(),
-    mobile = useMobile()
+    mobile = useMobile(),
+    installPrompt = useInstallPrompt()
   const { refresh: refreshAuth } = auth
   useEffect(() => {
     const expired = () => void refreshAuth()
@@ -325,6 +327,9 @@ export function App({ themeMode, onThemeChange }: { themeMode: ThemeMode; onThem
                         type: 'section',
                         title: me.name + ' · ' + roleLabels[me.role],
                         items: [
+                          ...(installPrompt
+                            ? [{ label: 'Installer l’application', onClick: () => void install() }]
+                            : []),
                           {
                             label: 'Se déconnecter',
                             onClick: () =>
