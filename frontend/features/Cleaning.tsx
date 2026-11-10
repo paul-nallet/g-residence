@@ -38,7 +38,18 @@ import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 import { Token } from '@astryxdesign/core/Token'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
-import { Check, ChevronLeft, ChevronRight, MessageSquareText, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  MessageSquareText,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from 'lucide-react'
 import {
   type CleaningComment,
   type CleaningCommentKind,
@@ -1973,8 +1984,11 @@ function Checklist({
   renderAction?: (item: CleaningItem) => ReactNode
 }) {
   const mobile = useMobile()
+  const [expanded, setExpanded] = useState(false)
   const list = items.filter((item) => item.kind === kind)
   if (!list.length) return null
+  const wrapped = (text: string | undefined, color?: 'secondary') =>
+    text && expanded ? <Text color={color}>{text}</Text> : text
   const todo = list.filter((item) => item.state === 'todo').length
   return (
     <List
@@ -1985,27 +1999,40 @@ function Checklist({
             <Heading level={2}>{kindTitles[kind]}</Heading>
             <Badge label={list.length - todo + '/' + list.length} />
           </HStack>
-          {editable && todo > 1 && (
-            <Button
+          <HStack gap={1} vAlign="center">
+            {editable && todo > 1 && (
+              <Button
+                size="sm"
+                label={kind === 'task' ? 'Tout marquer fait' : 'Tout marquer conforme'}
+                onClick={() => checkAll(kind)}
+              />
+            )}
+            <IconButton
+              label={expanded ? 'Replier les libellés' : 'Déplier les libellés'}
+              icon={<Icon icon={expanded ? ChevronsDownUp : ChevronsUpDown} />}
+              variant="ghost"
               size="sm"
-              label={kind === 'task' ? 'Tout marquer fait' : 'Tout marquer conforme'}
-              onClick={() => checkAll(kind)}
+              aria-expanded={expanded}
+              onClick={() => setExpanded((value) => !value)}
             />
-          )}
+          </HStack>
         </HStack>
       }
     >
       {list.map((item) => (
         <ListItem
           key={item.id}
-          label={item.label}
-          description={
+          label={wrapped(item.label)}
+          description={wrapped(
             item.state === 'todo'
               ? undefined
               : stateLabels[kind][item.state] +
-                (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
-                (item.updated_by && item.updated_at ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at) : '')
-          }
+                  (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
+                  (item.updated_by && item.updated_at
+                    ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at)
+                    : ''),
+            'secondary',
+          )}
           endContent={
             editable ? (
               <HStack gap={1} vAlign="center">
