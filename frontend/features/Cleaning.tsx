@@ -92,6 +92,44 @@ const kinds = ['task', 'check'] as const
 const wrapped = (text: string | undefined, open: boolean, color?: 'secondary') =>
   text && open ? <Text color={color}>{text}</Text> : text
 
+function FoldButton({ label, open, toggle }: { label: string; open: boolean; toggle: () => void }) {
+  const mobile = useMobile()
+  return (
+    <IconButton
+      label={(open ? 'Replier : ' : 'Déplier : ') + label}
+      icon={<Icon icon={open ? ChevronsDownUp : ChevronsUpDown} />}
+      variant="ghost"
+      size={mobile ? 'lg' : 'sm'}
+      aria-expanded={open}
+      onClick={toggle}
+    />
+  )
+}
+
+function FoldableItem({
+  label,
+  description,
+  endContent,
+}: {
+  label: string
+  description?: string
+  endContent?: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <ListItem
+      label={wrapped(label, open)}
+      description={wrapped(description, open, 'secondary')}
+      endContent={
+        <HStack gap={1} vAlign="center">
+          {endContent}
+          <FoldButton label={label} open={open} toggle={() => setOpen((value) => !value)} />
+        </HStack>
+      }
+    />
+  )
+}
+
 const kindTitles: Record<CleaningItemKind, string> = { task: 'À faire', check: 'À vérifier' }
 const stateLabels: Record<CleaningItemKind, Record<CleaningItemState, string>> = {
   task: { todo: 'À faire', done: 'Fait', issue: 'Non fait' },
@@ -208,6 +246,13 @@ function ChecklistEditor({
 }) {
   const inputs = useRef(new Map<string, HTMLInputElement>())
   const focus = useRef('')
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(new Set())
+  const unfold = (key: string) =>
+    setUnfolded((current) => {
+      const next = new Set(current)
+      if (!next.delete(key)) next.add(key)
+      return next
+    })
   const insert = (kind: CleaningItemKind, after?: string, labels = ['']) => {
     const created = labels.map((label) => newRow(kind, label))
     setRows((current) => {
@@ -243,44 +288,57 @@ function ChecklistEditor({
               return (
                 <HStack key={row.key} gap={1} vAlign="center">
                   <StackItem size="fill">
-                    <TextInput
-                      ref={(element: HTMLInputElement | null) => {
-                        if (!element) return void inputs.current.delete(row.key)
-                        inputs.current.set(row.key, element)
-                        if (focus.current !== row.key) return
-                        focus.current = ''
-                        element.focus()
-                      }}
-                      label={name}
-                      isLabelHidden
-                      width="100%"
-                      value={row.label}
-                      placeholder={examples[kind]}
-                      onChange={(value) => change(row.key, { label: value })}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
+                    {unfolded.has(row.key) ? (
+                      <TextArea
+                        label={name}
+                        isLabelHidden
+                        width="100%"
+                        rows={Math.min(6, Math.ceil(row.label.length / 32) + 1)}
+                        value={row.label}
+                        placeholder={examples[kind]}
+                        onChange={(value) => change(row.key, { label: value.replace(/\s*\n\s*/g, ' ') })}
+                      />
+                    ) : (
+                      <TextInput
+                        ref={(element: HTMLInputElement | null) => {
+                          if (!element) return void inputs.current.delete(row.key)
+                          inputs.current.set(row.key, element)
+                          if (focus.current !== row.key) return
+                          focus.current = ''
+                          element.focus()
+                        }}
+                        label={name}
+                        isLabelHidden
+                        width="100%"
+                        value={row.label}
+                        placeholder={examples[kind]}
+                        onChange={(value) => change(row.key, { label: value })}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            insert(kind, row.key)
+                          } else if (event.key === 'Backspace' && !row.label) {
+                            event.preventDefault()
+                            remove(row.key)
+                            const previous = list[index - 1]
+                            if (previous) inputs.current.get(previous.key)?.focus()
+                          }
+                        }}
+                        onPaste={(event: ClipboardEvent<HTMLInputElement>) => {
+                          const lines = event.clipboardData
+                            .getData('text')
+                            .split(/\r?\n/)
+                            .map((line) => line.trim())
+                            .filter(Boolean)
+                          if (lines.length < 2) return
                           event.preventDefault()
-                          insert(kind, row.key)
-                        } else if (event.key === 'Backspace' && !row.label) {
-                          event.preventDefault()
-                          remove(row.key)
-                          const previous = list[index - 1]
-                          if (previous) inputs.current.get(previous.key)?.focus()
-                        }
-                      }}
-                      onPaste={(event: ClipboardEvent<HTMLInputElement>) => {
-                        const lines = event.clipboardData
-                          .getData('text')
-                          .split(/\r?\n/)
-                          .map((line) => line.trim())
-                          .filter(Boolean)
-                        if (lines.length < 2) return
-                        event.preventDefault()
-                        change(row.key, { label: row.label + lines[0] })
-                        insert(kind, row.key, lines.slice(1))
-                      }}
-                    />
+                          change(row.key, { label: row.label + lines[0] })
+                          insert(kind, row.key, lines.slice(1))
+                        }}
+                      />
+                    )}
                   </StackItem>
+                  <FoldButton label={row.label || name} open={unfolded.has(row.key)} toggle={() => unfold(row.key)} />
                   <IconButton
                     label={'Supprimer : ' + (row.label || name)}
                     icon={<Icon icon={Trash2} />}
@@ -605,7 +663,7 @@ function PlanEditor({
             >
               {group.template?.items.length ? (
                 group.template.items.map((item, index) => (
-                  <ListItem key={index} label={item.label} description={kindTitles[item.kind]} />
+                  <FoldableItem key={index} label={item.label} description={kindTitles[item.kind]} />
                 ))
               ) : (
                 <ListItem
@@ -2020,16 +2078,7 @@ function Checklist({
     >
       {list.map((item) => {
         const open = expanded.has(item.id)
-        const unfold = (
-          <IconButton
-            label={(open ? 'Replier : ' : 'Déplier : ') + item.label}
-            icon={<Icon icon={open ? ChevronsDownUp : ChevronsUpDown} />}
-            variant="ghost"
-            size={mobile ? 'lg' : 'sm'}
-            aria-expanded={open}
-            onClick={() => toggle(item.id)}
-          />
-        )
+        const unfold = <FoldButton label={item.label} open={open} toggle={() => toggle(item.id)} />
         return (
           <ListItem
             key={item.id}
@@ -2847,7 +2896,7 @@ export function CleaningTemplateDetail({ id }: { id: string }) {
         return (
           <List key={kind} hasDividers listStyle="decimal" header={<Heading level={2}>{kindTitles[kind]}</Heading>}>
             {items.length ? (
-              items.map((item, index) => <ListItem key={index} label={item.label} />)
+              items.map((item, index) => <FoldableItem key={index} label={item.label} />)
             ) : (
               <ListItem label="Aucun point." />
             )}
