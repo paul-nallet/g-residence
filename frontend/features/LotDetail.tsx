@@ -2,6 +2,7 @@ import { useDetailCrumb } from '../app/crumb.ts'
 import { PageLayout } from '../app/PageLayout.tsx'
 import { useCallback, useEffect, useId, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
 import { Divider } from '@astryxdesign/core/Divider'
 import { Heading } from '@astryxdesign/core/Heading'
 import { List, ListItem } from '@astryxdesign/core/List'
@@ -56,6 +57,134 @@ export function LotDetail({ id, me }: { id: string; me: Me }) {
     setEdit(null)
     void result.refresh()
   }
+  const stayDetails = (stay: Stay, divider = true) => {
+    const notice = notices.find((item) => item.stay_id === stay.id && !item.withdrawn),
+      appointments = inspections.filter((item) => item.stay_id === stay.id)
+    const closed = !!stay.cancelled || !!stay.actual_end
+    return (
+      <VStack gap={3} key={stay.id}>
+        <HStack gap={2} wrap="wrap">
+          <Heading level={3}>
+            {stay.first_name} {stay.last_name}
+          </Heading>
+          <StateToken
+            state={
+              stay.cancelled ? 'cancelled' : stay.actual_end ? 'Terminé' : stay.actual_start ? 'occupied' : 'planned'
+            }
+          />
+        </HStack>
+        <Text>
+          Prévu : {dateLabel(stay.planned_start)} → {dateLabel(stay.planned_end ?? '')}
+        </Text>
+        <Text color="secondary">
+          Réel : entrée {dateLabel(stay.actual_start ?? '')} · sortie {dateLabel(stay.actual_end ?? '')}
+        </Text>
+        {!stay.cancelled && (
+          <HStack gap={2} wrap="wrap">
+            {!lot.archived && <Button label="Corriger le séjour" onClick={() => setEdit({ kind: 'stay', stay })} />}
+            {!lot.archived && (
+              <Button
+                label={stay.actual_start ? 'Corriger l’entrée réelle' : 'Confirmer l’entrée réelle'}
+                onClick={() => setEdit({ kind: 'action', stay, action: 'entry' })}
+              />
+            )}
+            {stay.actual_start && !lot.archived && (
+              <Button
+                label={stay.actual_end ? 'Corriger la sortie réelle' : 'Confirmer la sortie réelle'}
+                onClick={() => setEdit({ kind: 'action', stay, action: 'exit' })}
+              />
+            )}
+            {!stay.actual_start && !lot.archived && (
+              <Button
+                label="Annuler le séjour"
+                variant="ghost"
+                onClick={() => setEdit({ kind: 'action', stay, action: 'cancel' })}
+              />
+            )}
+            {!closed && !lot.archived && !notice && (
+              <Button label="Enregistrer un préavis" onClick={() => setEdit({ kind: 'notice', stayId: stay.id })} />
+            )}
+            {!lot.archived && (
+              <Button
+                label="Planifier un état des lieux"
+                onClick={() => setEdit({ kind: 'inspection', stayId: stay.id })}
+              />
+            )}
+          </HStack>
+        )}
+        {notice && (
+          <VStack gap={2}>
+            <Text weight="semibold">
+              Préavis reçu le {dateLabel(notice.received_on)} · départ le {dateLabel(notice.departure_on)}
+            </Text>
+            {notice.comment && <Text>{notice.comment}</Text>}
+            {!closed && (
+              <HStack gap={2} wrap="wrap">
+                <Button
+                  label="Corriger le préavis"
+                  onClick={() => setEdit({ kind: 'notice', stayId: stay.id, notice })}
+                />
+                <Button
+                  label="Retirer le préavis"
+                  variant="ghost"
+                  onClick={() => setEdit({ kind: 'withdraw', notice })}
+                />
+              </HStack>
+            )}
+          </VStack>
+        )}
+        {notices
+          .filter((n) => n.stay_id === stay.id && n.withdrawn)
+          .map((n) => (
+            <Text key={n.id} type="supporting">
+              Préavis retiré · reçu le {dateLabel(n.received_on)}, départ envisagé le {dateLabel(n.departure_on)}.
+            </Text>
+          ))}
+        {!!appointments.length && (
+          <List hasDividers header={<Heading level={3}>États des lieux</Heading>}>
+            {appointments.map((i) => (
+              <ListItem
+                key={i.id}
+                label={
+                  (i.kind === 'entry' ? 'Entrée' : 'Sortie') +
+                  ' · ' +
+                  dateLabel(parisDate(i.starts_at)) +
+                  ' à ' +
+                  parisTime(i.starts_at)
+                }
+                description={
+                  <VStack gap={2}>
+                    <Text>
+                      {i.duration} min ·{' '}
+                      {i.status === 'done'
+                        ? 'Réalisé le ' + dateLabel(i.completed_on ?? '')
+                        : i.status === 'cancelled'
+                          ? 'Annulé'
+                          : 'Prévu'}
+                    </Text>
+                    {i.comment && <Text>{i.comment}</Text>}
+                    {!stay.cancelled && !lot.archived && (
+                      <Button
+                        label="Modifier le rendez-vous"
+                        onClick={() => setEdit({ kind: 'inspection', stayId: stay.id, inspection: i })}
+                      />
+                    )}
+                  </VStack>
+                }
+                endContent={<StateToken state={i.status} />}
+              />
+            ))}
+          </List>
+        )}
+        {divider && <Divider />}
+      </VStack>
+    )
+  }
+  const current =
+    stays.find((stay) => !stay.cancelled && stay.actual_start && !stay.actual_end) ??
+    stays
+      .filter((stay) => !stay.cancelled && !stay.actual_start)
+      .toSorted((a, b) => a.planned_start.localeCompare(b.planned_start))[0]
   return (
     <PageLayout
       header={
@@ -127,6 +256,14 @@ export function LotDetail({ id, me }: { id: string; me: Me }) {
           aria-labelledby={panelPrefix + '-tab-overview'}
           tabIndex={0}
         >
+          {canEdit && current && (
+            <Card>
+              <VStack gap={3}>
+                <Heading level={2}>{current.actual_start ? 'Occupation en cours' : 'Prochaine occupation'}</Heading>
+                {stayDetails(current, false)}
+              </VStack>
+            </Card>
+          )}
           <EventList events={events} title="Prochains mouvements et rendez-vous · 30 jours" />
         </VStack>
       )}
@@ -146,145 +283,7 @@ export function LotDetail({ id, me }: { id: string; me: Me }) {
           </HStack>
           {!stays.length && <Text>Aucun séjour enregistré pour ce lot.</Text>}
           {!!stays.length && (
-            <OccupationsTable
-              stays={stays}
-              notices={notices}
-              renderDetails={(stay) => {
-                const notice = notices.find((item) => item.stay_id === stay.id && !item.withdrawn),
-                  appointments = inspections.filter((item) => item.stay_id === stay.id)
-                const closed = !!stay.cancelled || !!stay.actual_end
-                return (
-                  <VStack gap={3} key={stay.id}>
-                    <HStack gap={2} wrap="wrap">
-                      <Heading level={3}>
-                        {stay.first_name} {stay.last_name}
-                      </Heading>
-                      <StateToken
-                        state={
-                          stay.cancelled
-                            ? 'cancelled'
-                            : stay.actual_end
-                              ? 'Terminé'
-                              : stay.actual_start
-                                ? 'occupied'
-                                : 'planned'
-                        }
-                      />
-                    </HStack>
-                    <Text>
-                      Prévu : {dateLabel(stay.planned_start)} → {dateLabel(stay.planned_end ?? '')}
-                    </Text>
-                    <Text color="secondary">
-                      Réel : entrée {dateLabel(stay.actual_start ?? '')} · sortie {dateLabel(stay.actual_end ?? '')}
-                    </Text>
-                    {!stay.cancelled && (
-                      <HStack gap={2} wrap="wrap">
-                        {!lot.archived && (
-                          <Button label="Corriger le séjour" onClick={() => setEdit({ kind: 'stay', stay })} />
-                        )}
-                        {!lot.archived && (
-                          <Button
-                            label={stay.actual_start ? 'Corriger l’entrée réelle' : 'Confirmer l’entrée réelle'}
-                            onClick={() => setEdit({ kind: 'action', stay, action: 'entry' })}
-                          />
-                        )}
-                        {stay.actual_start && !lot.archived && (
-                          <Button
-                            label={stay.actual_end ? 'Corriger la sortie réelle' : 'Confirmer la sortie réelle'}
-                            onClick={() => setEdit({ kind: 'action', stay, action: 'exit' })}
-                          />
-                        )}
-                        {!stay.actual_start && !lot.archived && (
-                          <Button
-                            label="Annuler le séjour"
-                            variant="ghost"
-                            onClick={() => setEdit({ kind: 'action', stay, action: 'cancel' })}
-                          />
-                        )}
-                        {!closed && !lot.archived && !notice && (
-                          <Button
-                            label="Enregistrer un préavis"
-                            onClick={() => setEdit({ kind: 'notice', stayId: stay.id })}
-                          />
-                        )}
-                        {!lot.archived && (
-                          <Button
-                            label="Planifier un état des lieux"
-                            onClick={() => setEdit({ kind: 'inspection', stayId: stay.id })}
-                          />
-                        )}
-                      </HStack>
-                    )}
-                    {notice && (
-                      <VStack gap={2}>
-                        <Text weight="semibold">
-                          Préavis reçu le {dateLabel(notice.received_on)} · départ le {dateLabel(notice.departure_on)}
-                        </Text>
-                        {notice.comment && <Text>{notice.comment}</Text>}
-                        {!closed && (
-                          <HStack gap={2} wrap="wrap">
-                            <Button
-                              label="Corriger le préavis"
-                              onClick={() => setEdit({ kind: 'notice', stayId: stay.id, notice })}
-                            />
-                            <Button
-                              label="Retirer le préavis"
-                              variant="ghost"
-                              onClick={() => setEdit({ kind: 'withdraw', notice })}
-                            />
-                          </HStack>
-                        )}
-                      </VStack>
-                    )}
-                    {notices
-                      .filter((n) => n.stay_id === stay.id && n.withdrawn)
-                      .map((n) => (
-                        <Text key={n.id} type="supporting">
-                          Préavis retiré · reçu le {dateLabel(n.received_on)}, départ envisagé le{' '}
-                          {dateLabel(n.departure_on)}.
-                        </Text>
-                      ))}
-                    {!!appointments.length && (
-                      <List hasDividers header={<Heading level={3}>États des lieux</Heading>}>
-                        {appointments.map((i) => (
-                          <ListItem
-                            key={i.id}
-                            label={
-                              (i.kind === 'entry' ? 'Entrée' : 'Sortie') +
-                              ' · ' +
-                              dateLabel(parisDate(i.starts_at)) +
-                              ' à ' +
-                              parisTime(i.starts_at)
-                            }
-                            description={
-                              <VStack gap={2}>
-                                <Text>
-                                  {i.duration} min ·{' '}
-                                  {i.status === 'done'
-                                    ? 'Réalisé le ' + dateLabel(i.completed_on ?? '')
-                                    : i.status === 'cancelled'
-                                      ? 'Annulé'
-                                      : 'Prévu'}
-                                </Text>
-                                {i.comment && <Text>{i.comment}</Text>}
-                                {!stay.cancelled && !lot.archived && (
-                                  <Button
-                                    label="Modifier le rendez-vous"
-                                    onClick={() => setEdit({ kind: 'inspection', stayId: stay.id, inspection: i })}
-                                  />
-                                )}
-                              </VStack>
-                            }
-                            endContent={<StateToken state={i.status} />}
-                          />
-                        ))}
-                      </List>
-                    )}
-                    <Divider />
-                  </VStack>
-                )
-              }}
-            />
+            <OccupationsTable stays={stays} notices={notices} renderDetails={(stay) => stayDetails(stay)} />
           )}
         </VStack>
       )}

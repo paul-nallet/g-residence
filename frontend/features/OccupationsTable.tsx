@@ -9,12 +9,14 @@ export function OccupationsTable({
   stays,
   notices,
   renderDetails,
+  expanded,
 }: {
   stays: readonly Stay[]
   notices: readonly Notice[]
   renderDetails: (stay: Stay) => ReactNode
+  expanded?: string
 }) {
-  const [expandedKeys, setExpandedKeys] = useState(new Set<string>())
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set<string>(expanded ? [expanded] : []))
   const expansion = useTableRowExpansion<Stay>({
     expandedKeys,
     onToggle: (id) =>

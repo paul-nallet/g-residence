@@ -32,9 +32,19 @@ import { type CleaningTask, isReady, REVIEW_LIMIT } from '../../src/domain/clean
 import { readinessCount, taskTarget } from './readiness.tsx'
 import { addDays, today } from '../../src/domain/rules.ts'
 import { call } from '../lib/api.ts'
-import { useQuery } from '../lib/data.ts'
+import { useMutation, useQuery } from '../lib/data.ts'
 import { CommentIcon, taskComments } from './Cleaning.tsx'
-import { dateLabel, eventHref, EventStateToken, eventSubject, kindLabels, Loading, StateToken } from './shared.tsx'
+import {
+  DateField,
+  dateLabel,
+  Editor,
+  eventHref,
+  EventStateToken,
+  eventSubject,
+  kindLabels,
+  Loading,
+  StateToken,
+} from './shared.tsx'
 
 type Tone = 'error' | 'warning' | 'info'
 type Action = {
@@ -76,6 +86,7 @@ export function Overview({ me }: { me: Me }) {
     month = date.slice(0, 7),
     manager = me.role !== 'cleaner',
     [showDone, setShowDone] = useState(readShowDone),
+    [confirming, setConfirming] = useState<Event | null>(null),
     load = useCallback(async () => {
       const [
         lots,
@@ -277,6 +288,25 @@ export function Overview({ me }: { me: Me }) {
 
           return (
             <>
+              {manager && (
+                <HStack gap={2} wrap="wrap">
+                  <Button label="Planifier un ménage" icon={<Icon icon={ClipboardList} />} href="#cleaning" />
+                  <Button label="Signalements" icon={<Icon icon={Wrench} />} href="#technical/signalements" />
+                  <Button label="Sortie de stock" icon={<Icon icon={Package} />} href="#stock" />
+                  <Button label="Relever les compteurs" icon={<Icon icon={Droplets} />} href="#meters" />
+                  <Button label="Calendrier" icon={<Icon icon={CalendarClock} />} href="#calendar" />
+                </HStack>
+              )}
+              {confirming && (
+                <ConfirmMovement
+                  event={confirming}
+                  close={() => setConfirming(null)}
+                  saved={() => {
+                    setConfirming(null)
+                    void result.refresh()
+                  }}
+                />
+              )}
               <List
                 hasDividers
                 header={
@@ -342,7 +372,7 @@ export function Overview({ me }: { me: Me }) {
                   }
                 >
                   {overdue.map((event) => (
-                    <EventItem key={event.id} event={event} withDate />
+                    <EventItem key={event.id} event={event} withDate confirm={manager ? setConfirming : undefined} />
                   ))}
                 </List>
               )}
@@ -420,7 +450,7 @@ export function Overview({ me }: { me: Me }) {
               <Grid columns={{ minWidth: 320, max: 2 }} gap={5}>
                 <List hasDividers header={<Heading level={2}>Aujourd’hui</Heading>}>
                   {todayEvents.map((event) => (
-                    <EventItem key={event.id} event={event} />
+                    <EventItem key={event.id} event={event} confirm={manager ? setConfirming : undefined} />
                   ))}
                   {data.cleaning.map((task) => (
                     <ListItem
@@ -457,7 +487,7 @@ export function Overview({ me }: { me: Me }) {
                   }
                 >
                   {upcoming.slice(0, 8).map((event) => (
-                    <EventItem key={event.id} event={event} withDate />
+                    <EventItem key={event.id} event={event} withDate confirm={manager ? setConfirming : undefined} />
                   ))}
                   {upcoming.length === 0 && <ListItem label="Aucun événement prévu cette semaine." />}
                   {upcoming.length > 8 && (
@@ -485,8 +515,45 @@ function Metric({ label, value, detail, href }: { label: string; value: string; 
   )
 }
 
-function EventItem({ event, withDate = false }: { event: Event; withDate?: boolean }) {
+function ConfirmMovement({ event, close, saved }: { event: Event; close: () => void; saved: () => void }) {
+  const action = event.kind === 'exit' ? 'exit' : 'entry',
+    [date, setDate] = useState(event.date > today() ? today() : event.date),
+    mutation = useMutation()
+  return (
+    <Editor
+      title={action === 'entry' ? 'Confirmer l’entrée réelle' : 'Confirmer la sortie réelle'}
+      label="Confirmer"
+      close={close}
+      busy={mutation.busy}
+      error={mutation.error}
+      submit={() =>
+        void mutation.run(
+          () =>
+            call((client) =>
+              client.stays.action({ params: { id: event.id.split(':')[0]! }, payload: { action, date } }),
+            ),
+          saved,
+        )
+      }
+    >
+      <Text>{eventSubject(event) + (event.resident ? ' · ' + event.resident : '')}</Text>
+      <DateField label="Date réelle" value={date} onChange={setDate} past />
+    </Editor>
+  )
+}
+
+function EventItem({
+  event,
+  withDate = false,
+  confirm,
+}: {
+  event: Event
+  withDate?: boolean
+  confirm?: (event: Event) => void
+}) {
   const icon = event.kind === 'intervention' ? Wrench : CalendarClock
+  const confirmable =
+    confirm && (event.kind === 'entry' || event.kind === 'exit') && event.status === 'planned' && event.date <= today()
   return (
     <ListItem
       startContent={<Icon icon={icon} />}
@@ -500,7 +567,13 @@ function EventItem({ event, withDate = false }: { event: Event; withDate?: boole
         .filter(Boolean)
         .join(' · ')}
       href={eventHref(event)}
-      endContent={<EventStateToken event={event} />}
+      endContent={
+        confirmable ? (
+          <Button size="sm" label="Confirmer" onClick={() => confirm(event)} />
+        ) : (
+          <EventStateToken event={event} />
+        )
+      }
     />
   )
 }
