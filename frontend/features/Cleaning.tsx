@@ -89,6 +89,9 @@ import {
 } from './readiness.tsx'
 
 const kinds = ['task', 'check'] as const
+const wrapped = (text: string | undefined, open: boolean, color?: 'secondary') =>
+  text && open ? <Text color={color}>{text}</Text> : text
+
 const kindTitles: Record<CleaningItemKind, string> = { task: 'À faire', check: 'À vérifier' }
 const stateLabels: Record<CleaningItemKind, Record<CleaningItemState, string>> = {
   task: { todo: 'À faire', done: 'Fait', issue: 'Non fait' },
@@ -1984,11 +1987,15 @@ function Checklist({
   renderAction?: (item: CleaningItem) => ReactNode
 }) {
   const mobile = useMobile()
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const list = items.filter((item) => item.kind === kind)
   if (!list.length) return null
-  const wrapped = (text: string | undefined, color?: 'secondary') =>
-    text && expanded ? <Text color={color}>{text}</Text> : text
+  const toggle = (id: string) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
   const todo = list.filter((item) => item.state === 'todo').length
   return (
     <List
@@ -2007,70 +2014,78 @@ function Checklist({
                 onClick={() => checkAll(kind)}
               />
             )}
-            <IconButton
-              label={expanded ? 'Replier les libellés' : 'Déplier les libellés'}
-              icon={<Icon icon={expanded ? ChevronsDownUp : ChevronsUpDown} />}
-              variant="ghost"
-              size="sm"
-              aria-expanded={expanded}
-              onClick={() => setExpanded((value) => !value)}
-            />
           </HStack>
         </HStack>
       }
     >
-      {list.map((item) => (
-        <ListItem
-          key={item.id}
-          label={wrapped(item.label)}
-          description={wrapped(
-            item.state === 'todo'
-              ? undefined
-              : stateLabels[kind][item.state] +
-                  (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
-                  (item.updated_by && item.updated_at
-                    ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at)
-                    : ''),
-            'secondary',
-          )}
-          endContent={
-            editable ? (
-              <HStack gap={1} vAlign="center">
-                {renderAction?.(item)}
-                <ToggleButton
-                  label={stateLabels[kind].done + ' : ' + item.label}
-                  isIconOnly={mobile}
-                  size={mobile ? 'lg' : undefined}
-                  icon={<Icon icon={Check} />}
-                  isPressed={item.state === 'done'}
-                  onPressedChange={(pressed) => setState(item, pressed ? 'done' : 'todo')}
-                >
-                  {stateLabels[kind].done}
-                </ToggleButton>
-                <ToggleButton
-                  label={stateLabels[kind].issue + ' : ' + item.label}
-                  isIconOnly={mobile}
-                  size={mobile ? 'lg' : undefined}
-                  icon={<Icon icon={X} />}
-                  isPressed={item.state === 'issue'}
-                  onPressedChange={(pressed) => (pressed ? report(item) : setState(item, 'todo'))}
-                >
-                  {stateLabels[kind].issue}
-                </ToggleButton>
-              </HStack>
-            ) : (
-              <HStack gap={1} vAlign="center">
-                {renderAction?.(item)}
-                <Token
-                  label={stateLabels[kind][item.state]}
-                  color={item.state === 'issue' ? 'orange' : item.state === 'done' ? 'green' : 'default'}
-                  size="sm"
-                />
-              </HStack>
-            )
-          }
-        />
-      ))}
+      {list.map((item) => {
+        const open = expanded.has(item.id)
+        const unfold = (
+          <IconButton
+            label={(open ? 'Replier : ' : 'Déplier : ') + item.label}
+            icon={<Icon icon={open ? ChevronsDownUp : ChevronsUpDown} />}
+            variant="ghost"
+            size={mobile ? 'lg' : 'sm'}
+            aria-expanded={open}
+            onClick={() => toggle(item.id)}
+          />
+        )
+        return (
+          <ListItem
+            key={item.id}
+            label={wrapped(item.label, open)}
+            description={wrapped(
+              item.state === 'todo'
+                ? undefined
+                : stateLabels[kind][item.state] +
+                    (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
+                    (item.updated_by && item.updated_at
+                      ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at)
+                      : ''),
+              open,
+              'secondary',
+            )}
+            endContent={
+              editable ? (
+                <HStack gap={1} vAlign="center">
+                  {unfold}
+                  {renderAction?.(item)}
+                  <ToggleButton
+                    label={stateLabels[kind].done + ' : ' + item.label}
+                    isIconOnly={mobile}
+                    size={mobile ? 'lg' : undefined}
+                    icon={<Icon icon={Check} />}
+                    isPressed={item.state === 'done'}
+                    onPressedChange={(pressed) => setState(item, pressed ? 'done' : 'todo')}
+                  >
+                    {stateLabels[kind].done}
+                  </ToggleButton>
+                  <ToggleButton
+                    label={stateLabels[kind].issue + ' : ' + item.label}
+                    isIconOnly={mobile}
+                    size={mobile ? 'lg' : undefined}
+                    icon={<Icon icon={X} />}
+                    isPressed={item.state === 'issue'}
+                    onPressedChange={(pressed) => (pressed ? report(item) : setState(item, 'todo'))}
+                  >
+                    {stateLabels[kind].issue}
+                  </ToggleButton>
+                </HStack>
+              ) : (
+                <HStack gap={1} vAlign="center">
+                  {unfold}
+                  {renderAction?.(item)}
+                  <Token
+                    label={stateLabels[kind][item.state]}
+                    color={item.state === 'issue' ? 'orange' : item.state === 'done' ? 'green' : 'default'}
+                    size="sm"
+                  />
+                </HStack>
+              )
+            }
+          />
+        )
+      })}
     </List>
   )
 }
