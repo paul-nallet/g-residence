@@ -31,6 +31,7 @@ import {
   useTableSelection,
 } from '@astryxdesign/core/Table'
 import { Popover } from '@astryxdesign/core/Popover'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
@@ -90,8 +91,7 @@ import {
 } from './readiness.tsx'
 
 const kinds = ['task', 'check'] as const
-const wrapped = (text: string | undefined, open: boolean, color?: 'secondary') =>
-  text && open ? <Text color={color}>{text}</Text> : text
+const wrapped = (text: string | undefined, color?: 'secondary') => text && <Text color={color}>{text}</Text>
 
 function FoldButton({ label, open, toggle }: { label: string; open: boolean; toggle: () => void }) {
   const mobile = useMobile()
@@ -107,28 +107,8 @@ function FoldButton({ label, open, toggle }: { label: string; open: boolean; tog
   )
 }
 
-function FoldableItem({
-  label,
-  description,
-  endContent,
-}: {
-  label: string
-  description?: string
-  endContent?: ReactNode
-}) {
-  const [open, setOpen] = useState(true)
-  return (
-    <ListItem
-      label={wrapped(label, open)}
-      description={wrapped(description, open, 'secondary')}
-      endContent={
-        <HStack gap={1} vAlign="center">
-          {endContent}
-          <FoldButton label={label} open={open} toggle={() => setOpen((value) => !value)} />
-        </HStack>
-      }
-    />
-  )
+function TextItem({ label, description }: { label: string; description?: string }) {
+  return <ListItem label={wrapped(label)} description={wrapped(description, 'secondary')} />
 }
 
 const openTask = rowLink<CleaningTask>((task) => '#cleaning/' + task.id)
@@ -667,7 +647,7 @@ function PlanEditor({
             >
               {group.template?.items.length ? (
                 group.template.items.map((item, index) => (
-                  <FoldableItem key={index} label={item.label} description={kindTitles[item.kind]} />
+                  <TextItem key={index} label={item.label} description={kindTitles[item.kind]} />
                 ))
               ) : (
                 <ListItem
@@ -2051,15 +2031,8 @@ function Checklist({
   renderAction?: (item: CleaningItem) => ReactNode
 }) {
   const mobile = useMobile()
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const list = items.filter((item) => item.kind === kind)
   if (!list.length) return null
-  const toggle = (id: string) =>
-    setCollapsed((current) => {
-      const next = new Set(current)
-      if (!next.delete(id)) next.add(id)
-      return next
-    })
   const todo = list.filter((item) => item.state === 'todo').length
   return (
     <List
@@ -2083,46 +2056,68 @@ function Checklist({
       }
     >
       {list.map((item) => {
-        const open = !collapsed.has(item.id)
-        const unfold = <FoldButton label={item.label} open={open} toggle={() => toggle(item.id)} />
-        const status = wrapped(
-          item.state === 'todo'
-            ? item.note
-              ? 'À reprendre : ' + item.note
-              : undefined
-            : stateLabels[kind][item.state] +
-                (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
-                (item.updated_by && item.updated_at ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at) : ''),
-          open,
-          'secondary',
-        )
+        const trace =
+          item.updated_by && item.updated_at ? item.updated_by + ', ' + timeLabel(item.updated_at) : undefined
+        const status =
+          item.state === 'issue' ? (
+            <VStack gap={1}>
+              <HStack gap={2} vAlign="center" wrap="wrap">
+                <Token label={stateLabels[kind].issue} color="orange" icon={<Icon icon={X} />} size="sm" />
+                {item.note && <Text weight="semibold">{item.note}</Text>}
+              </HStack>
+              {wrapped(trace, 'secondary')}
+            </VStack>
+          ) : item.state === 'todo' ? (
+            item.note && (
+              <HStack gap={2} vAlign="center" wrap="wrap">
+                <Token label="À reprendre" color="orange" size="sm" />
+                <Text weight="semibold">{item.note}</Text>
+              </HStack>
+            )
+          ) : (
+            wrapped(stateLabels[kind].done + (trace ? ' · ' + trace : ''), 'secondary')
+          )
+        const flag =
+          item.state === 'issue' ? (
+            <StatusDot variant="warning" label={stateLabels[kind].issue} icon={<Icon icon={X} />} />
+          ) : item.state === 'todo' && item.note ? (
+            <StatusDot variant="accent" label="À reprendre" />
+          ) : undefined
         return (
           <ListItem
             key={item.id}
-            label={wrapped(item.label, open)}
+            align="first-line"
+            startContent={flag}
+            label={wrapped(item.label)}
             description={
               editable ? (
                 <VStack gap={2}>
                   {status}
-                  <HStack gap={1} vAlign="center" wrap="wrap">
-                    <ToggleButton
-                      label={stateLabels[kind].done + ' : ' + item.label}
-                      size={mobile ? 'lg' : undefined}
-                      icon={<Icon icon={Check} />}
-                      isPressed={item.state === 'done'}
-                      onPressedChange={(pressed) => setState(item, pressed ? 'done' : 'todo')}
-                    >
-                      {stateLabels[kind].done}
-                    </ToggleButton>
-                    <ToggleButton
-                      label={stateLabels[kind].issue + ' : ' + item.label}
-                      size={mobile ? 'lg' : undefined}
-                      icon={<Icon icon={X} />}
-                      isPressed={item.state === 'issue'}
-                      onPressedChange={(pressed) => (pressed ? report(item) : setState(item, 'todo'))}
-                    >
-                      {stateLabels[kind].issue}
-                    </ToggleButton>
+                  <HStack gap={2} vAlign="center">
+                    <StackItem size="fill">
+                      <Button
+                        label={stateLabels[kind].done}
+                        aria-label={stateLabels[kind].done + ' : ' + item.label}
+                        aria-pressed={item.state === 'done'}
+                        variant={item.state === 'done' ? 'primary' : 'secondary'}
+                        size={mobile ? 'lg' : undefined}
+                        width="100%"
+                        icon={<Icon icon={Check} color={item.state === 'done' ? 'inherit' : 'success'} />}
+                        onClick={() => setState(item, item.state === 'done' ? 'todo' : 'done')}
+                      />
+                    </StackItem>
+                    <StackItem size="fill">
+                      <Button
+                        label={stateLabels[kind].issue}
+                        aria-label={stateLabels[kind].issue + ' : ' + item.label}
+                        aria-pressed={item.state === 'issue'}
+                        variant={item.state === 'issue' ? 'destructive' : 'secondary'}
+                        size={mobile ? 'lg' : undefined}
+                        width="100%"
+                        icon={<Icon icon={X} color={item.state === 'issue' ? 'inherit' : 'warning'} />}
+                        onClick={() => (item.state === 'issue' ? setState(item, 'todo') : report(item))}
+                      />
+                    </StackItem>
                     {renderAction?.(item)}
                   </HStack>
                 </VStack>
@@ -2131,11 +2126,8 @@ function Checklist({
               )
             }
             endContent={
-              editable ? (
-                unfold
-              ) : (
+              editable ? undefined : (
                 <HStack gap={1} vAlign="center">
-                  {unfold}
                   {renderAction?.(item)}
                   <Token
                     label={stateLabels[kind][item.state]}
@@ -2911,7 +2903,7 @@ export function CleaningTemplateDetail({ id }: { id: string }) {
         return (
           <List key={kind} hasDividers listStyle="decimal" header={<Heading level={2}>{kindTitles[kind]}</Heading>}>
             {items.length ? (
-              items.map((item, index) => <FoldableItem key={index} label={item.label} />)
+              items.map((item, index) => <TextItem key={index} label={item.label} />)
             ) : (
               <ListItem label="Aucun point." />
             )}
