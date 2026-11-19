@@ -74,6 +74,7 @@ import { useHashParam } from '../lib/hashParams.ts'
 import { enqueue, useCleaningDay, useCleaningTask, useOutbox } from '../lib/cleaningOffline.ts'
 import { checkForChanges } from '../lib/sync.ts'
 import { useMobile } from '../lib/useMobile.ts'
+import { rowLink } from '../lib/rowLink.ts'
 import { DateField, dateLabel, Editor, Feedback, Loading, PeriodNav, roleLabels, StateToken } from './shared.tsx'
 import {
   ArrivalToken,
@@ -129,6 +130,9 @@ function FoldableItem({
     />
   )
 }
+
+const openTask = rowLink<CleaningTask>((task) => '#cleaning/' + task.id)
+const openTemplate = rowLink<CleaningTemplate>((template) => '#cleaning/fiches/' + template.id)
 
 const kindTitles: Record<CleaningItemKind, string> = { task: 'À faire', check: 'À vérifier' }
 const stateLabels: Record<CleaningItemKind, Record<CleaningItemState, string>> = {
@@ -994,7 +998,8 @@ function DayTable({
           data={[...tasks]}
           idKey="id"
           dividers="rows"
-          plugins={movable.length ? { selection } : { selectionSpacer }}
+          hasHover
+          plugins={movable.length ? { selection, open: openTask } : { selectionSpacer, open: openTask }}
           columns={[
             {
               key: 'lot_number',
@@ -1085,7 +1090,8 @@ export function LotCleaning({ lotId, archived }: { lotId: string; archived: bool
           idKey="id"
           rowCount={result.data.total}
           rowIndexStart={(page - 1) * 20 + 1}
-          plugins={{ pagination }}
+          hasHover
+          plugins={{ pagination, open: openTask }}
           dividers="rows"
           columns={[
             {
@@ -2798,6 +2804,8 @@ export function CleaningTemplates() {
         <Table
           data={[...templates]}
           idKey="id"
+          hasHover
+          plugins={{ open: openTemplate }}
           dividers="rows"
           columns={[
             {
