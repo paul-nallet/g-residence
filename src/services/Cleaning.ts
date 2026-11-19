@@ -764,8 +764,9 @@ const make = Effect.gen(function* () {
       ...(redo.length
         ? [
             sql(
-              `UPDATE cleaning_task_items SET state='todo',note='',updated_by=NULL,updated_at=NULL
+              `UPDATE cleaning_task_items SET state='todo',note=?,updated_by=NULL,updated_at=NULL
               WHERE task_id=? AND residence_id=? AND id IN (${placeholders(redo)})`,
+              input.comment,
               taskId,
               me.residenceId,
               ...redo,

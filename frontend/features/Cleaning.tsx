@@ -115,7 +115,7 @@ function FoldableItem({
   description?: string
   endContent?: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   return (
     <ListItem
       label={wrapped(label, open)}
@@ -1973,7 +1973,7 @@ function ReviewEditor({
       {revision && items.length > 0 && (
         <MultiSelector
           label="Points à refaire"
-          description="Ces points repassent à faire. Les autres restent cochés."
+          description="Ces points repassent à faire, avec votre commentaire. Les autres restent cochés."
           isOptional
           options={items.map((item) => ({ value: item.id, label: kindTitles[item.kind] + ' · ' + item.label }))}
           value={redo}
@@ -2045,11 +2045,11 @@ function Checklist({
   renderAction?: (item: CleaningItem) => ReactNode
 }) {
   const mobile = useMobile()
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const list = items.filter((item) => item.kind === kind)
   if (!list.length) return null
   const toggle = (id: string) =>
-    setExpanded((current) => {
+    setCollapsed((current) => {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
@@ -2077,49 +2077,56 @@ function Checklist({
       }
     >
       {list.map((item) => {
-        const open = expanded.has(item.id)
+        const open = !collapsed.has(item.id)
         const unfold = <FoldButton label={item.label} open={open} toggle={() => toggle(item.id)} />
+        const status = wrapped(
+          item.state === 'todo'
+            ? item.note
+              ? 'À reprendre : ' + item.note
+              : undefined
+            : stateLabels[kind][item.state] +
+                (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
+                (item.updated_by && item.updated_at ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at) : ''),
+          open,
+          'secondary',
+        )
         return (
           <ListItem
             key={item.id}
             label={wrapped(item.label, open)}
-            description={wrapped(
-              item.state === 'todo'
-                ? undefined
-                : stateLabels[kind][item.state] +
-                    (item.state === 'issue' && item.note ? ' : ' + item.note : '') +
-                    (item.updated_by && item.updated_at
-                      ? ' · ' + item.updated_by + ', ' + timeLabel(item.updated_at)
-                      : ''),
-              open,
-              'secondary',
-            )}
+            description={
+              editable ? (
+                <VStack gap={2}>
+                  {status}
+                  <HStack gap={1} vAlign="center" wrap="wrap">
+                    <ToggleButton
+                      label={stateLabels[kind].done + ' : ' + item.label}
+                      size={mobile ? 'lg' : undefined}
+                      icon={<Icon icon={Check} />}
+                      isPressed={item.state === 'done'}
+                      onPressedChange={(pressed) => setState(item, pressed ? 'done' : 'todo')}
+                    >
+                      {stateLabels[kind].done}
+                    </ToggleButton>
+                    <ToggleButton
+                      label={stateLabels[kind].issue + ' : ' + item.label}
+                      size={mobile ? 'lg' : undefined}
+                      icon={<Icon icon={X} />}
+                      isPressed={item.state === 'issue'}
+                      onPressedChange={(pressed) => (pressed ? report(item) : setState(item, 'todo'))}
+                    >
+                      {stateLabels[kind].issue}
+                    </ToggleButton>
+                    {renderAction?.(item)}
+                  </HStack>
+                </VStack>
+              ) : (
+                status
+              )
+            }
             endContent={
               editable ? (
-                <HStack gap={1} vAlign="center">
-                  {unfold}
-                  {renderAction?.(item)}
-                  <ToggleButton
-                    label={stateLabels[kind].done + ' : ' + item.label}
-                    isIconOnly={mobile}
-                    size={mobile ? 'lg' : undefined}
-                    icon={<Icon icon={Check} />}
-                    isPressed={item.state === 'done'}
-                    onPressedChange={(pressed) => setState(item, pressed ? 'done' : 'todo')}
-                  >
-                    {stateLabels[kind].done}
-                  </ToggleButton>
-                  <ToggleButton
-                    label={stateLabels[kind].issue + ' : ' + item.label}
-                    isIconOnly={mobile}
-                    size={mobile ? 'lg' : undefined}
-                    icon={<Icon icon={X} />}
-                    isPressed={item.state === 'issue'}
-                    onPressedChange={(pressed) => (pressed ? report(item) : setState(item, 'todo'))}
-                  >
-                    {stateLabels[kind].issue}
-                  </ToggleButton>
-                </HStack>
+                unfold
               ) : (
                 <HStack gap={1} vAlign="center">
                   {unfold}

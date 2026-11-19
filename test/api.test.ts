@@ -1799,7 +1799,7 @@ test('ménage : points d’étape, validation et demande de reprise par le gesti
     const [{ id }] = (await (await e.request(`/cleaning/tasks?from=${day}&to=${day}`)).json()) as [{ id: string }]
     type Detail = {
       task: { status: string; review: string | null; reviewed_by: string | null; comments: number; day: string }
-      items: { id: string; state: string }[]
+      items: { id: string; state: string; note: string }[]
       comments: { kind: string; body: string; author: string }[]
     }
     const detail = async () => (await (await e.request('/cleaning/tasks/' + id!)).json()) as Detail
@@ -1843,6 +1843,10 @@ test('ménage : points d’étape, validation et demande de reprise par le gesti
       ['planned', 'revision', tomorrow, ['todo', 'done']],
     )
     assert.equal(current.comments.at(-1)!.body, 'Traces sur le miroir')
+    assert.deepEqual(
+      current.items.map((i) => i.note),
+      ['Traces sur le miroir', ''],
+    )
     assert.equal((await finish()).status, 409)
     await e.request('/cleaning/items/' + current.items[0]!.id, 'PATCH', { state: 'done', note: '' }, cleaner)
     assert.equal((await finish()).status, 200)
